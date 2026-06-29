@@ -110,12 +110,12 @@ if (isProduction) {
     const adminDist = path.join(__dirname, '../edusn_admin/dist');
 
     if (fs.existsSync(adminDist)) {
-        app.use(express.static(adminDist, {
+        app.use('/admin', express.static(adminDist, {
             index: false,
             setHeaders: setSpaStaticHeaders,
         }));
 
-        // SPA routes: /admin/* and /staff/*
+        // SPA routes: /admin/* and /staff/* (staff shares the same build + /admin/assets)
         app.get(/^\/(admin|staff)(\/.*)?$/, (req, res) => {
             res.sendFile(path.join(adminDist, 'index.html'));
         });
