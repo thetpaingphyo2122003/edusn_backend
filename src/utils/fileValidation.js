@@ -26,6 +26,9 @@ const DOCUMENT_TYPES = new Map([
     ['text/csv', ['.csv']],
     ['application/zip', ['.zip']],
     ['application/x-zip-compressed', ['.zip']],
+    ['application/vnd.rar', ['.rar']],
+    ['application/x-rar-compressed', ['.rar']],
+    ['application/octet-stream', ['.rar']],
 ]);
 
 const getExtension = (file) => path.extname(file?.originalname || '').toLowerCase();

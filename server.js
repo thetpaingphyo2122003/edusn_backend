@@ -74,7 +74,7 @@ app.use(
 );
 
 // ============ BODY PARSER ============
-const bodyLimit = process.env.API_BODY_LIMIT || '5mb';
+const bodyLimit = process.env.API_BODY_LIMIT || '100mb';
 app.use(express.json({ limit: bodyLimit }));
 app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 

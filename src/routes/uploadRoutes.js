@@ -12,11 +12,11 @@ const multer = require('multer');
 const getRequestBaseUrl = (req) =>
     (process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
 
-// Configure multer for larger file size (50MB)
+// Configure multer for larger file size (100MB)
 const videoUpload = multer({
     storage: multer.memoryStorage(),
     limits: {
-        fileSize: 50 * 1024 * 1024 // 50MB limit
+        fileSize: 100 * 1024 * 1024 // 100MB limit
     },
     fileFilter: (req, file, cb) => {
         try {
@@ -50,7 +50,7 @@ router.post('/image', protect, uploadLimiter, upload.single('image'), async (req
     }
 });
 
-// ✅ NEW: Upload video - max 50MB
+// ✅ NEW: Upload video - max 100MB
 router.post('/video', protect, uploadLimiter, videoUpload.single('video'), async (req, res) => {
     try {
         if (!req.file) {
@@ -58,10 +58,10 @@ router.post('/video', protect, uploadLimiter, videoUpload.single('video'), async
         }
         
         // Check file size
-        if (req.file.size > 50 * 1024 * 1024) {
+        if (req.file.size > 100 * 1024 * 1024) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Video size exceeds 50MB limit. Please upload a smaller video.' 
+                message: 'Video size exceeds 100MB limit. Please upload a smaller video.' 
             });
         }
         
@@ -119,10 +119,10 @@ router.post('/', protect, uploadLimiter, videoUpload.single('file'), async (req,
             result = await uploadImage(req.file, 'chat/uploads');
         } else if (isVideo) {
             // Check video size
-            if (req.file.size > 50 * 1024 * 1024) {
+            if (req.file.size > 100 * 1024 * 1024) {
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'Video size exceeds 50MB limit' 
+                    message: 'Video size exceeds 100MB limit' 
                 });
             }
             result = await uploadVideo(req.file, 'chat/uploads');
