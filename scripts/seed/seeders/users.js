@@ -6,21 +6,21 @@ const seedUsers = async () => {
   const users = [
     {
       username: 'superadmin',
-      email: 'superadmin@edusn.co.uk',
+      email: 'superadmin@edusn.online',
       full_name: 'EDUSN Super Admin',
       role: 'super_admin',
       status: 'active',
     },
     {
       username: 'admin',
-      email: 'admin@edusn.co.uk',
+      email: 'admin@edusn.online',
       full_name: 'EDUSN Admin',
       role: 'admin',
       status: 'active',
     },
     {
       username: 'staff',
-      email: 'staff@edusn.co.uk',
+      email: 'staff@edusn.online',
       full_name: 'EDUSN Staff',
       role: 'staff',
       status: 'active',
@@ -29,7 +29,7 @@ const seedUsers = async () => {
     },
     {
       username: 'viewer',
-      email: 'viewer@edusn.co.uk',
+      email: 'viewer@edusn.online',
       full_name: 'EDUSN Viewer',
       role: 'viewer',
       status: 'active',
