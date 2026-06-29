@@ -1,4 +1,10 @@
 const notificationRepository = require('../repositories/notificationRepository');
+const NotificationService = require('../services/notificationService');
+const {
+    broadcastRead,
+    broadcastAllRead,
+    broadcastDeleted
+} = require('../utils/notificationEmitter');
 
 /**
  * @desc    Get all notifications
@@ -112,6 +118,7 @@ const markAsRead = async (req, res, next) => {
         }
         
         const updated = await notificationRepository.markAsRead(id);
+        broadcastRead(id);
         
         res.json({
             success: true,
@@ -132,6 +139,7 @@ const markAsRead = async (req, res, next) => {
 const markAllAsRead = async (req, res, next) => {
     try {
         await notificationRepository.markAllAsRead();
+        broadcastAllRead();
         
         res.json({
             success: true,
@@ -161,6 +169,7 @@ const deleteNotification = async (req, res, next) => {
         }
         
         await notificationRepository.deleteById(id);
+        broadcastDeleted(id);
         
         res.json({
             success: true,
@@ -199,12 +208,12 @@ const deleteReadNotifications = async (req, res, next) => {
 const createNotification = async (req, res, next) => {
     try {
         const { type, title, message, link, reference_id, reference_model } = req.body;
-        
-        const notification = await notificationRepository.createNotification({
-            type,
+
+        const notification = await NotificationService.create({
+            type: type || 'announcement',
             title,
             message,
-            link,
+            link: link || '/admin/dashboard',
             reference_id: reference_id || null,
             reference_model: reference_model || null,
             created_by: req.user._id

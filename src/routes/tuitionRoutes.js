@@ -9,9 +9,10 @@ const { protect, authorize } = require('../middleware/authMiddleware');
 router.get('/payment-info', tuitionController.getPaymentInfo);
 router.get('/virtual-attendance', tuitionController.getVirtualAttendance);
 router.get('/page-info', tuitionController.getTuitionPageInfo);
+router.get('/page-settings', tuitionController.getTuitionPageSettings);
 router.get('/fees/category/:category', tuitionController.getFeesByCategory);
 
-// အထွေထွေ routes များ
+router.get('/fees/admin/all', protect, authorize('admin'), tuitionController.getAllFeesAdmin);
 router.get('/fees', tuitionController.getAllFees);
 router.get('/fees/:id', tuitionController.getFeeById);
 
@@ -23,5 +24,6 @@ router.delete('/fees/:id', protect, authorize('admin'), tuitionController.delete
 router.put('/payment-info', protect, authorize('admin'), tuitionController.updatePaymentInfo);
 router.put('/virtual-attendance', protect, authorize('admin'), tuitionController.updateVirtualAttendance);
 router.put('/page-info', protect, authorize('admin'), tuitionController.updateTuitionPageInfo);
+router.put('/page-settings', protect, authorize('admin'), tuitionController.updateTuitionPageSettings);
 
 module.exports = router;

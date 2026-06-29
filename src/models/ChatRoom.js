@@ -62,6 +62,15 @@ const chatRoomSchema = new mongoose.Schema({
         enum: ['personal', 'support', 'group'],
         default: 'personal'
     },
+    chat_type: {
+        type: String,
+        enum: ['personal', 'support', 'group'],
+        default: 'personal'
+    },
+    is_support_chat: {
+        type: Boolean,
+        default: false
+    },
     room_name: {
         type: String,
         default: null

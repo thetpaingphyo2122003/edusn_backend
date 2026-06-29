@@ -3,22 +3,22 @@ const router = express.Router();
 const notificationController = require('../controllers/notificationController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
-// ==================== PROTECTED ROUTES (Admin only) ====================
-router.use(protect, authorize('admin'));
+const STAFF_ROLES = ['admin', 'super_admin', 'staff', 'editor'];
+const ADMIN_ROLES = ['admin', 'super_admin'];
 
-// Stats and counts
-router.get('/stats', notificationController.getNotificationStats);
-router.get('/unread-count', notificationController.getUnreadCount);
+router.use(protect);
 
-// Bulk operations
-router.put('/mark-all-read', notificationController.markAllAsRead);
-router.delete('/read', notificationController.deleteReadNotifications);
+// Read + mark read — staff and admins
+router.get('/stats', authorize(...STAFF_ROLES), notificationController.getNotificationStats);
+router.get('/unread-count', authorize(...STAFF_ROLES), notificationController.getUnreadCount);
+router.put('/mark-all-read', authorize(...STAFF_ROLES), notificationController.markAllAsRead);
+router.get('/', authorize(...STAFF_ROLES), notificationController.getAllNotifications);
+router.get('/:id', authorize(...STAFF_ROLES), notificationController.getNotificationById);
+router.put('/:id/read', authorize(...STAFF_ROLES), notificationController.markAsRead);
 
-// CRUD operations
-router.get('/', notificationController.getAllNotifications);
-router.get('/:id', notificationController.getNotificationById);
-router.put('/:id/read', notificationController.markAsRead);
-router.delete('/:id', notificationController.deleteNotification);
-router.post('/', notificationController.createNotification);
+// Create + delete — admins only
+router.post('/', authorize(...ADMIN_ROLES), notificationController.createNotification);
+router.delete('/read', authorize(...ADMIN_ROLES), notificationController.deleteReadNotifications);
+router.delete('/:id', authorize(...ADMIN_ROLES), notificationController.deleteNotification);
 
 module.exports = router;

@@ -1,5 +1,8 @@
 // src/controllers/tuitionController.js
 const tuitionRepository = require('../repositories/tuitionRepository');
+const TuitionSettings = require('../models/TuitionSettings');
+const { defaultCategorySettings } = require('../models/TuitionSettings');
+const NotificationService = require('../services/notificationService');
 
 /**
  * @desc    Get all tuition fees
@@ -21,6 +24,30 @@ const getAllFees = async (req, res, next) => {
             success: true,
             count: fees.length,
             data: fees
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Get all tuition fees for admin (includes inactive)
+ * @route   GET /api/tuition/fees/admin/all
+ * @access  Private (Admin)
+ */
+const getAllFeesAdmin = async (req, res, next) => {
+    try {
+        const { category } = req.query;
+        let fees = await tuitionRepository.findAllFeesAdmin();
+
+        if (category) {
+            fees = fees.filter((fee) => fee.category === category);
+        }
+
+        res.json({
+            success: true,
+            count: fees.length,
+            data: fees,
         });
     } catch (error) {
         next(error);
@@ -127,6 +154,62 @@ const getTuitionPageInfo = async (req, res, next) => {
     }
 };
 
+const getTuitionPageSettings = async (req, res, next) => {
+    try {
+        const { category } = req.query;
+        let settings = await TuitionSettings.findOne();
+
+        if (!settings) {
+            settings = await TuitionSettings.create({});
+        }
+
+        if (category && defaultCategorySettings[category]) {
+            const categorySettings = settings[category]?.toObject?.() || settings[category] || {};
+            return res.json({
+                success: true,
+                data: {
+                    ...defaultCategorySettings[category],
+                    ...categorySettings,
+                },
+            });
+        }
+
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateTuitionPageSettings = async (req, res, next) => {
+    try {
+        const { category, ...payload } = req.body;
+
+        if (!category || !defaultCategorySettings[category]) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid category is required (campus, virtual, gcse_a_level)',
+            });
+        }
+
+        let settings = await TuitionSettings.findOne();
+
+        if (settings) {
+            settings[category] = { ...settings[category]?.toObject?.(), ...payload };
+            await settings.save();
+        } else {
+            settings = await TuitionSettings.create({ [category]: payload });
+        }
+
+        res.json({
+            success: true,
+            message: 'Tuition page settings updated',
+            data: settings,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 /**
  * @desc    Create new tuition fee (Admin only)
  * @route   POST /api/tuition/fees
@@ -134,7 +217,7 @@ const getTuitionPageInfo = async (req, res, next) => {
  */
 const createFee = async (req, res, next) => {
     try {
-        const { category, program_name, year_level, total_fees_mmk, material_fees_mmk, microsoft_fees_mmk, installments, installment_note, scholarship_note, display_order } = req.body;
+        const { category, program_name, year_level, total_fees_mmk, total_fees_usd, material_fees_mmk, material_fees_usd, microsoft_fees_mmk, microsoft_fees_usd, installments, installment_note, scholarship_note, display_order } = req.body;
         
         const fee = await tuitionRepository.create({
             type: 'fee',
@@ -142,8 +225,11 @@ const createFee = async (req, res, next) => {
             program_name: program_name || null,
             year_level: year_level || null,
             total_fees_mmk,
+            total_fees_usd: total_fees_usd ?? null,
             material_fees_mmk: material_fees_mmk || 0,
+            material_fees_usd: material_fees_usd ?? null,
             microsoft_fees_mmk: microsoft_fees_mmk || 0,
+            microsoft_fees_usd: microsoft_fees_usd ?? null,
             installments: installments || [],
             installment_note: installment_note || null,
             scholarship_note: scholarship_note || null,
@@ -151,6 +237,10 @@ const createFee = async (req, res, next) => {
             status: 'active'
         });
         
+        NotificationService.tuitionUpdated(fee, req.user._id).catch((err) =>
+            console.error('Tuition notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Tuition fee created successfully',
@@ -169,7 +259,7 @@ const createFee = async (req, res, next) => {
 const updateFee = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { category, program_name, year_level, total_fees_mmk, material_fees_mmk, microsoft_fees_mmk, installments, installment_note, scholarship_note, display_order, status } = req.body;
+        const { category, program_name, year_level, total_fees_mmk, total_fees_usd, material_fees_mmk, material_fees_usd, microsoft_fees_mmk, microsoft_fees_usd, installments, installment_note, scholarship_note, display_order, status } = req.body;
         
         const fee = await tuitionRepository.findById(id);
         
@@ -185,8 +275,11 @@ const updateFee = async (req, res, next) => {
             program_name: program_name !== undefined ? program_name : fee.program_name,
             year_level: year_level !== undefined ? year_level : fee.year_level,
             total_fees_mmk: total_fees_mmk || fee.total_fees_mmk,
+            total_fees_usd: total_fees_usd !== undefined ? total_fees_usd : fee.total_fees_usd,
             material_fees_mmk: material_fees_mmk !== undefined ? material_fees_mmk : fee.material_fees_mmk,
+            material_fees_usd: material_fees_usd !== undefined ? material_fees_usd : fee.material_fees_usd,
             microsoft_fees_mmk: microsoft_fees_mmk !== undefined ? microsoft_fees_mmk : fee.microsoft_fees_mmk,
+            microsoft_fees_usd: microsoft_fees_usd !== undefined ? microsoft_fees_usd : fee.microsoft_fees_usd,
             installments: installments || fee.installments,
             installment_note: installment_note !== undefined ? installment_note : fee.installment_note,
             scholarship_note: scholarship_note !== undefined ? scholarship_note : fee.scholarship_note,
@@ -194,6 +287,10 @@ const updateFee = async (req, res, next) => {
             status: status || fee.status
         });
         
+        NotificationService.tuitionUpdated(updatedFee, req.user._id).catch((err) =>
+            console.error('Tuition notification error:', err)
+        );
+
         res.json({
             success: true,
             message: 'Tuition fee updated successfully',
@@ -370,11 +467,14 @@ const toggleFeeStatus = async (req, res, next) => {
 
 module.exports = {
     getAllFees,
+    getAllFeesAdmin,
     getFeesByCategory,
     getFeeById,
     getPaymentInfo,
     getVirtualAttendance,
     getTuitionPageInfo,
+    getTuitionPageSettings,
+    updateTuitionPageSettings,
     createFee,
     updateFee,
     deleteFee,

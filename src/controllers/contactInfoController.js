@@ -123,7 +123,7 @@ const getContactById = async (req, res, next) => {
  */
 const createContact = async (req, res, next) => {
     try {
-        const { type, name, sub_title, address, emails, phones, display_order } = req.body;
+        const { type, name, sub_title, address, emails, phones, display_order, extra_data } = req.body;
         
         const contact = await contactInfoRepository.create({
             type,
@@ -133,6 +133,7 @@ const createContact = async (req, res, next) => {
             emails: emails || { general: null, office: null, support: null, admissions: null },
             phones: phones || { main: null, hotline: null, emergency: null },
             display_order: display_order || 0,
+            extra_data: extra_data || {},
             status: 'active'
         });
         
@@ -154,7 +155,7 @@ const createContact = async (req, res, next) => {
 const updateContact = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { type, name, sub_title, address, emails, phones, display_order, status } = req.body;
+        const { type, name, sub_title, address, emails, phones, display_order, status, extra_data } = req.body;
         
         const contact = await contactInfoRepository.findById(id);
         
@@ -173,6 +174,7 @@ const updateContact = async (req, res, next) => {
             emails: emails || contact.emails,
             phones: phones || contact.phones,
             display_order: display_order !== undefined ? display_order : contact.display_order,
+            extra_data: extra_data !== undefined ? extra_data : (contact.extra_data || {}),
             status: status || contact.status
         });
         

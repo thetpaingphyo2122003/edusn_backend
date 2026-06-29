@@ -21,6 +21,10 @@ class SubjectRepository extends BaseRepository {
     async findKeyStage2() {
         return await this.findByCategory('key_stage_2');
     }
+
+    async findAllForAdmin(filter = {}) {
+        return await this.findAll(filter, { sort: { display_order: 1, createdAt: -1 } });
+    }
 }
 
 module.exports = new SubjectRepository();

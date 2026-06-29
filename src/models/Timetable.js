@@ -11,6 +11,15 @@ const timetableSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    color_class: {
+        type: String,
+        enum: ['bg-sky', 'bg-yellow', 'bg-lightred', 'bg-purple', 'bg-green', 'bg-cri', 'bg-hel'],
+        default: 'bg-sky'
+    },
+    row_highlight: {
+        type: Boolean,
+        default: false
+    },
     day_of_week: {
         type: String,
         required: true,

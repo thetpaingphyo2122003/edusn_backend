@@ -1,7 +1,13 @@
 // src/controllers/chatMessageController.js
 const chatMessageRepository = require('../repositories/chatMessageRepository');
 const chatRoomRepository = require('../repositories/chatRoomRepository');
-const { checkChatPermission } = require('../middleware/chatPermissions');
+const {
+    isStaffRole,
+    isSupportRoom,
+    formatMessageForViewer,
+    formatMessagesForViewer,
+    canAccessRoom
+} = require('../utils/chatHelpers');
 console.log('✅ chatMessageController loaded');
 
 /**
@@ -12,17 +18,20 @@ console.log('✅ chatMessageController loaded');
 const getMessages = async (req, res, next) => {
     try {
         const { roomId } = req.params;
-        const isStaff = ['admin', 'staff', 'super_admin'].includes(req.user.role);
+        const isStaff = isStaffRole(req.user.role);
         
         const room = await chatRoomRepository.findByRoomId(roomId);
         if (!room) {
             return res.status(404).json({ success: false, message: 'Room not found' });
         }
+
+        if (!canAccessRoom(room, req.user)) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
         
         let filter = { room_id: roomId, is_deleted: false };
         
-        // Role-based filtering for support chats
-        if (room.chat_type === 'support') {
+        if (isSupportRoom(room)) {
             if (!isStaff) {
                 // Regular users can only see:
                 // 1. Their own messages
@@ -100,10 +109,12 @@ const getMessages = async (req, res, next) => {
             }
         }
         
+        const formattedMessages = formatMessagesForViewer(uniqueMessages, req.user, room);
+        
         res.json({
             success: true,
-            count: uniqueMessages.length,
-            data: uniqueMessages
+            count: formattedMessages.length,
+            data: formattedMessages
         });
     } catch (error) {
         console.error('Get messages error:', error);
@@ -131,6 +142,17 @@ const sendMessage = async (req, res, next) => {
         const room = await chatRoomRepository.findByRoomId(roomId);
         if (!room) {
             return res.status(404).json({ success: false, message: 'Chat room not found' });
+        }
+
+        if (!canAccessRoom(room, req.user)) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+
+        if (isSupportRoom(room)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Support chats must use /api/chat/messages/support'
+            });
         }
 
         // Check for duplicate submission in last 5 seconds
@@ -189,7 +211,8 @@ const sendMessage = async (req, res, next) => {
                 name: fileInfo.name,
                 size: fileInfo.size,
                 type: fileInfo.type,
-                mimeType: fileInfo.mimeType
+                mimeType: fileInfo.mimeType,
+                caption: fileInfo.caption || null
             };
         }
 
@@ -214,8 +237,9 @@ const sendMessage = async (req, res, next) => {
 
         // Update last message in room
         let lastMessageText = message;
-        if (message_type === 'file') lastMessageText = '📎 File attached';
-        if (message_type === 'image') lastMessageText = '🖼️ Image sent';
+        if (message_type === 'file') lastMessageText = processedFileInfo?.caption || 'File attached';
+        if (message_type === 'image') lastMessageText = processedFileInfo?.caption || 'Image sent';
+        if (message_type === 'video') lastMessageText = processedFileInfo?.caption || 'Video sent';
         
         await chatRoomRepository.updateLastMessage(
             roomId, 
@@ -224,10 +248,11 @@ const sendMessage = async (req, res, next) => {
             message_type || 'text'
         );
 
-        // Emit via socket
+        // Emit via socket (room + each online participant for inbox updates)
         const io = req.app.get('io');
         if (io) {
-            io.to(roomId).emit('new_message', {
+            const { emitChatEventToRoom } = require('../utils/chatEmit');
+            emitChatEventToRoom(io, room, 'new_message', {
                 success: true,
                 data: newMessage,
                 tempId: tempId
@@ -354,6 +379,11 @@ const deleteMessageForMe = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Message not found' });
         }
 
+        const room = await chatRoomRepository.findByRoomId(message.room_id);
+        if (!canAccessRoom(room, req.user)) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
+
         await chatMessageRepository.updateById(messageId, {
             $push: { deleted_by: req.user._id }
         });
@@ -377,6 +407,10 @@ const markAllAsRead = async (req, res, next) => {
         const room = await chatRoomRepository.findByRoomId(roomId);
         if (!room) {
             return res.status(404).json({ success: false, message: 'Room not found' });
+        }
+
+        if (!canAccessRoom(room, req.user)) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
         }
 
         // Update all unread messages
@@ -420,8 +454,8 @@ const markAllAsRead = async (req, res, next) => {
  */
 const sendSupportMessage = async (req, res, next) => {
     try {
-        const { roomId, message, message_type, replyToId, isStaffOnly } = req.body;
-        const isStaff = ['admin', 'staff', 'super_admin'].includes(req.user.role);
+        const { roomId, message, message_type, replyToId, isStaffOnly, tempId, fileInfo } = req.body;
+        const isStaff = isStaffRole(req.user.role);
         
         if (!roomId || !message) {
             return res.status(400).json({ success: false, message: 'roomId and message are required' });
@@ -431,14 +465,29 @@ const sendSupportMessage = async (req, res, next) => {
         if (!room) {
             return res.status(404).json({ success: false, message: 'Chat room not found' });
         }
+
+        if (!isSupportRoom(room)) {
+            return res.status(400).json({
+                success: false,
+                message: 'This endpoint is only for support chats'
+            });
+        }
+
+        if (!canAccessRoom(room, req.user)) {
+            return res.status(403).json({ success: false, message: 'Access denied' });
+        }
         
-        // Check if user is participant
         const isParticipant = room.participants.some(
             p => p.user_id.toString() === req.user._id.toString()
         );
         
-        if (!isParticipant) {
+        // Staff can reply to any support room they can access.
+        if (!isParticipant && !isStaff) {
             return res.status(403).json({ success: false, message: 'You are not a participant in this chat' });
+        }
+
+        if (isStaffOnly && !isStaff) {
+            return res.status(403).json({ success: false, message: 'Staff-only messages require staff role' });
         }
         
         const senderName = req.user.full_name || req.user.username || 'User';
@@ -456,12 +505,24 @@ const sendSupportMessage = async (req, res, next) => {
             }
         }
         
+        let processedFileInfo = null;
+        if (fileInfo) {
+            processedFileInfo = {
+                name: fileInfo.name,
+                size: fileInfo.size,
+                type: fileInfo.type,
+                mimeType: fileInfo.mimeType,
+                caption: fileInfo.caption || null,
+            };
+        }
+
         const newMessage = await chatMessageRepository.create({
             room_id: roomId,
             sender: { user_id: req.user._id, name: senderName, role: req.user.role },
             message: message,
             message_type: message_type || 'text',
             reply_to: replyTo,
+            fileInfo: processedFileInfo,
             is_public: !isStaff,
             is_staff_reply: isStaff,
             visible_to_staff_only: isStaffOnly || false,
@@ -470,21 +531,32 @@ const sendSupportMessage = async (req, res, next) => {
         });
         
         let lastMessageText = message;
-        if (message_type === 'file') lastMessageText = '📎 File attached';
-        if (message_type === 'image') lastMessageText = '🖼️ Image sent';
+        if (message_type === 'file') lastMessageText = processedFileInfo?.caption || 'File attached';
+        if (message_type === 'image') lastMessageText = processedFileInfo?.caption || 'Image sent';
+        if (message_type === 'video') lastMessageText = processedFileInfo?.caption || 'Video sent';
         
         await chatRoomRepository.updateLastMessage(roomId, lastMessageText, senderName, message_type || 'text');
         
         const io = req.app.get('io');
         if (io) {
-            io.to(roomId).emit('new_message', {
-                success: true,
-                data: newMessage,
-                is_staff: isStaff
+            const { emitChatEventToRoomPerViewer } = require('../utils/chatEmit');
+            await emitChatEventToRoomPerViewer(io, room, 'new_message', (viewer) => {
+                const payload = formatMessageForViewer(newMessage, viewer || req.user, room);
+                if (!payload) return null;
+                return {
+                    success: true,
+                    data: payload,
+                    tempId,
+                    is_staff: isStaff
+                };
             });
         }
         
-        res.status(201).json({ success: true, data: newMessage });
+        res.status(201).json({
+            success: true,
+            data: formatMessageForViewer(newMessage, req.user, room),
+            tempId
+        });
     } catch (error) {
         console.error('Send support message error:', error);
         next(error);

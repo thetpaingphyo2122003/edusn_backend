@@ -1,6 +1,180 @@
 // src/controllers/blogController.js
 const blogRepository = require('../repositories/blogRepository');
+const BlogSettings = require('../models/BlogSettings');
 const { uploadImage, deleteImage } = require('../services/uploadService');
+const NotificationService = require('../services/notificationService');
+
+const parseJsonField = (value, fallback = null) => {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return fallback;
+    }
+};
+
+const VALID_REACTIONS = ['like', 'love', 'celebrate'];
+
+const normalizeReactions = (reactions) => ({
+    like: reactions?.like || 0,
+    love: reactions?.love || 0,
+    celebrate: reactions?.celebrate || 0,
+});
+
+const getReactorKey = (req) => {
+    const fromBody = req.body?.reactorKey || req.body?.userKey;
+    const fromQuery = req.query?.reactorKey || req.query?.userKey;
+    if (typeof fromBody === 'string' && fromBody.trim()) return fromBody.trim();
+    if (typeof fromQuery === 'string' && fromQuery.trim()) return fromQuery.trim();
+    return null;
+};
+
+const countApprovedComments = (comments = []) =>
+    (comments || []).filter((comment) => comment.status === 'approved').length;
+
+const sanitizeBlogForList = (blog) => {
+    const obj = blog.toObject ? blog.toObject() : { ...blog };
+    return {
+        _id: obj._id,
+        title: obj.title,
+        slug: obj.slug,
+        excerpt: obj.excerpt,
+        featured_image: obj.featured_image,
+        author: obj.author,
+        category: obj.category,
+        tags: obj.tags,
+        published_date: obj.published_date,
+        createdAt: obj.createdAt,
+        view_count: obj.view_count || 0,
+        like_count: obj.like_count || 0,
+        comment_count: countApprovedComments(obj.comments),
+        reactions: normalizeReactions(obj.reactions),
+    };
+};
+
+const getUserReaction = (target, reactorKey) => {
+    if (!reactorKey || !target) return null;
+
+    if (Array.isArray(target.user_reactions)) {
+        const entry = target.user_reactions.find((item) => item.user_key === reactorKey);
+        if (entry?.reaction) return entry.reaction;
+    }
+
+    // Legacy data: reacted_users stored keys without reaction type
+    if (Array.isArray(target.reacted_users) && target.reacted_users.includes(reactorKey)) {
+        return 'like';
+    }
+
+    return null;
+};
+
+const getReactionState = (target, reactorKey) => {
+    const activeReaction = getUserReaction(target, reactorKey);
+    return {
+        user_reacted: Boolean(activeReaction),
+        active_reaction: activeReaction,
+    };
+};
+
+const ensureReactionTarget = (target) => {
+    if (!target.reactions) {
+        target.reactions = { like: 0, love: 0, celebrate: 0 };
+    }
+    if (!Array.isArray(target.user_reactions)) {
+        target.user_reactions = [];
+    }
+    if (!Array.isArray(target.reacted_users)) {
+        target.reacted_users = [];
+    }
+    return target;
+};
+
+const syncLegacyReactedUsers = (target) => {
+    target.reacted_users = (target.user_reactions || []).map((item) => item.user_key);
+};
+
+const toggleReactionOnTarget = (target, reactorKey, reaction) => {
+    ensureReactionTarget(target);
+
+    const existing = getUserReaction(target, reactorKey);
+
+    if (!existing) {
+        target.reactions[reaction] = (target.reactions[reaction] || 0) + 1;
+        target.user_reactions.push({ user_key: reactorKey, reaction });
+        syncLegacyReactedUsers(target);
+        return { user_reacted: true, active_reaction: reaction };
+    }
+
+    if (existing === reaction) {
+        target.reactions[reaction] = Math.max(0, (target.reactions[reaction] || 0) - 1);
+        target.user_reactions = target.user_reactions.filter((item) => item.user_key !== reactorKey);
+        syncLegacyReactedUsers(target);
+        return { user_reacted: false, active_reaction: null };
+    }
+
+    target.reactions[existing] = Math.max(0, (target.reactions[existing] || 0) - 1);
+    target.reactions[reaction] = (target.reactions[reaction] || 0) + 1;
+    const entry = target.user_reactions.find((item) => item.user_key === reactorKey);
+    if (entry) {
+        entry.reaction = reaction;
+    } else {
+        target.user_reactions.push({ user_key: reactorKey, reaction });
+    }
+    syncLegacyReactedUsers(target);
+    return { user_reacted: true, active_reaction: reaction };
+};
+
+const sanitizeBlogForPublic = (blog, reactorKey = null) => {
+    const obj = blog.toObject ? blog.toObject() : { ...blog };
+    obj.reactions = normalizeReactions(obj.reactions);
+    const postReactionState = getReactionState(obj, reactorKey);
+    obj.user_reacted = postReactionState.user_reacted;
+    obj.active_reaction = postReactionState.active_reaction;
+    obj.comments = (obj.comments || [])
+        .filter((comment) => comment.status === 'approved')
+        .map((comment) => {
+            const commentReactionState = getReactionState(comment, reactorKey);
+            return {
+                ...comment,
+                reactions: normalizeReactions(comment.reactions),
+                user_reacted: commentReactionState.user_reacted,
+                active_reaction: commentReactionState.active_reaction,
+                replies: (comment.replies || [])
+                    .filter((reply) => reply.status === 'approved')
+                    .map((reply) => {
+                        const replyReactionState = getReactionState(reply, reactorKey);
+                        return {
+                            ...reply,
+                            reactions: normalizeReactions(reply.reactions),
+                            user_reacted: replyReactionState.user_reacted,
+                            active_reaction: replyReactionState.active_reaction,
+                        };
+                    }),
+            };
+        });
+    return obj;
+};
+
+const getTotalReactions = (reactions) => {
+    const normalized = normalizeReactions(reactions);
+    return normalized.like + normalized.love + normalized.celebrate;
+};
+
+const canModifyBlog = (blog, user) => {
+    if (['admin', 'super_admin'].includes(user.role)) return true;
+    if (blog.created_by && blog.created_by.toString() === user._id.toString()) return true;
+    return false;
+};
+
+const buildAuthor = (user, authorOverride) => {
+    const parsed = parseJsonField(authorOverride, null);
+    return {
+        name: parsed?.name || user.name || 'EDUSN',
+        avatar: parsed?.avatar || user.avatar || null,
+        role: parsed?.role || user.role || 'Admin',
+    };
+};
 
 /**
  * @desc    Get all blogs (with pagination, filter, search) - PUBLIC (published only)
@@ -39,7 +213,7 @@ const getAllBlogs = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: blogs,
+            data: blogs.map((blog) => sanitizeBlogForList(blog)),
             pagination: {
                 currentPage: page,
                 totalPages: Math.ceil(total / limit),
@@ -97,6 +271,7 @@ const getAllBlogsAdmin = async (req, res, next) => {
 const getBlogBySlug = async (req, res, next) => {
     try {
         const { slug } = req.params;
+        const reactorKey = getReactorKey(req);
         
         const blog = await blogRepository.findBySlug(slug);
         
@@ -115,12 +290,10 @@ const getBlogBySlug = async (req, res, next) => {
             });
         }
         
-        // Increment view count
-        await blogRepository.incrementViewCount(blog._id);
-        
+        // Return published blog without incrementing views (use POST /:id/view)
         res.json({
             success: true,
-            data: blog
+            data: sanitizeBlogForPublic(blog, reactorKey)
         });
     } catch (error) {
         next(error);
@@ -160,7 +333,7 @@ const getBlogById = async (req, res, next) => {
  */
 const createBlog = async (req, res, next) => {
     try {
-        const { title, content, excerpt, category, tags, status, seo } = req.body;
+        const { title, content, excerpt, category, tags, status, seo, author, gallery_images } = req.body;
 
         let featuredImage = null;
 
@@ -174,9 +347,12 @@ const createBlog = async (req, res, next) => {
             if (Array.isArray(tags)) {
                 processedTags = tags;
             } else if (typeof tags === 'string') {
-                processedTags = tags.split(',').map(tag => tag.trim());
+                processedTags = tags.split(',').map(tag => tag.trim()).filter(Boolean);
             }
         }
+
+        const parsedSeo = parseJsonField(seo, {});
+        const parsedGallery = parseJsonField(gallery_images, []);
 
         const blog = await blogRepository.create({
             title,
@@ -186,10 +362,18 @@ const createBlog = async (req, res, next) => {
             tags: processedTags,
             status: status || 'draft',
             featured_image: featuredImage,
+            gallery_images: Array.isArray(parsedGallery) ? parsedGallery : [],
             published_date: status === 'published' ? new Date() : null,
-            seo: seo || {},
-            author: req.user._id
+            seo: parsedSeo || {},
+            author: buildAuthor(req.user, author),
+            created_by: req.user._id,
         });
+
+        if (blog.status === 'published') {
+            NotificationService.blogCreated(blog, req.user._id).catch((err) =>
+                console.error('Blog notification error:', err)
+            );
+        }
 
         res.status(201).json({
             success: true,
@@ -220,14 +404,14 @@ const updateBlog = async (req, res, next) => {
             });
         }
         
-        if (blog.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (!canModifyBlog(blog, req.user)) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to update this blog'
             });
         }
         
-        const { title, content, excerpt, category, tags, status, seo } = req.body;
+        const { title, content, excerpt, category, tags, status, seo, author, gallery_images } = req.body;
         
         let featuredImage = blog.featured_image;
         if (req.file) {
@@ -252,15 +436,27 @@ const updateBlog = async (req, res, next) => {
             }
         }
         
+        const parsedSeo = parseJsonField(seo, blog.seo || {});
+        const parsedGallery = parseJsonField(gallery_images, null);
+        const parsedAuthor = parseJsonField(author, null);
+
         const updateData = {
             title: title || blog.title,
             content: content || blog.content,
             excerpt: excerpt || blog.excerpt,
             category: category || blog.category,
             tags: processedTags,
-            seo: seo || blog.seo,
+            seo: parsedSeo || blog.seo,
             featured_image: featuredImage
         };
+
+        if (parsedAuthor) {
+            updateData.author = buildAuthor(req.user, parsedAuthor);
+        }
+
+        if (Array.isArray(parsedGallery)) {
+            updateData.gallery_images = parsedGallery;
+        }
         
         // Handle status change
         if (status && status !== blog.status) {
@@ -303,7 +499,7 @@ const publishBlog = async (req, res, next) => {
             });
         }
         
-        if (blog.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (!canModifyBlog(blog, req.user)) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to publish this blog'
@@ -340,7 +536,7 @@ const unpublishBlog = async (req, res, next) => {
             });
         }
         
-        if (blog.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (!canModifyBlog(blog, req.user)) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to unpublish this blog'
@@ -377,7 +573,7 @@ const deleteBlog = async (req, res, next) => {
             });
         }
         
-        if (blog.author.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+        if (!canModifyBlog(blog, req.user)) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to delete this blog'
@@ -470,10 +666,17 @@ const addComment = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { name, email, content } = req.body;
+
+        if (!name?.trim() || !email?.trim() || !content?.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name, email, and comment are required',
+            });
+        }
         
         const blog = await blogRepository.findById(id);
         
-        if (!blog) {
+        if (!blog || blog.status !== 'published') {
             return res.status(404).json({
                 success: false,
                 message: 'Blog not found'
@@ -481,19 +684,251 @@ const addComment = async (req, res, next) => {
         }
         
         const comment = {
-            user_name: name,
-            user_email: email,
-            content: content,
-            status: 'pending'
+            user_name: name.trim(),
+            user_email: email.trim(),
+            content: content.trim(),
+            status: 'approved',
+            reactions: { like: 0, love: 0, celebrate: 0 },
+            reacted_users: [],
+            replies: [],
         };
         
         blog.comments.push(comment);
         await blog.save();
         
+        const savedComment = blog.comments[blog.comments.length - 1];
+        const publicComment = {
+            ...savedComment.toObject(),
+            reactions: normalizeReactions(savedComment.reactions),
+            replies: [],
+        };
+        
         res.status(201).json({
             success: true,
-            message: 'Comment added successfully',
-            data: comment
+            message: 'Comment posted successfully',
+            data: publicComment,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    React to a blog post
+ * @route   POST /api/blogs/:id/react
+ * @access  Public
+ */
+const reactToBlog = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { reaction = 'like' } = req.body;
+        const reactorKey = getReactorKey(req);
+
+        if (!VALID_REACTIONS.includes(reaction)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid reaction type',
+            });
+        }
+        if (!reactorKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'Sign in is required to react',
+            });
+        }
+
+        const blog = await blogRepository.findById(id);
+        if (!blog || blog.status !== 'published') {
+            return res.status(404).json({
+                success: false,
+                message: 'Blog not found',
+            });
+        }
+
+        if (!blog.reactions) {
+            blog.reactions = { like: 0, love: 0, celebrate: 0 };
+        }
+
+        const previousReaction = getUserReaction(blog, reactorKey);
+        const reactionState = toggleReactionOnTarget(blog, reactorKey, reaction);
+
+        if (reaction === 'like' && previousReaction !== 'like' && reactionState.active_reaction === 'like') {
+            blog.like_count = (blog.like_count || 0) + 1;
+        } else if (previousReaction === 'like' && reactionState.active_reaction !== 'like') {
+            blog.like_count = Math.max(0, (blog.like_count || 0) - 1);
+        }
+
+        await blog.save();
+
+        res.json({
+            success: true,
+            message: reactionState.user_reacted ? 'Reaction recorded' : 'Reaction removed',
+            data: {
+                reactions: normalizeReactions(blog.reactions),
+                like_count: blog.like_count,
+                user_reacted: reactionState.user_reacted,
+                active_reaction: reactionState.active_reaction,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    React to a comment or reply
+ * @route   POST /api/blogs/:id/comments/:commentId/react
+ * @access  Public
+ */
+const reactToComment = async (req, res, next) => {
+    try {
+        const { id, commentId } = req.params;
+        const { reaction = 'like', replyId } = req.body;
+        const reactorKey = getReactorKey(req);
+
+        if (!VALID_REACTIONS.includes(reaction)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid reaction type',
+            });
+        }
+        if (!reactorKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'Sign in is required to react',
+            });
+        }
+
+        const blog = await blogRepository.findById(id);
+        if (!blog || blog.status !== 'published') {
+            return res.status(404).json({
+                success: false,
+                message: 'Blog not found',
+            });
+        }
+
+        const comment = blog.comments.id(commentId);
+        if (!comment) {
+            return res.status(404).json({
+                success: false,
+                message: 'Comment not found',
+            });
+        }
+
+        let target = comment;
+        if (replyId) {
+            target = comment.replies.id(replyId);
+            if (!target) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Reply not found',
+                });
+            }
+        }
+
+        const reactionState = toggleReactionOnTarget(target, reactorKey, reaction);
+        await blog.save();
+
+        res.json({
+            success: true,
+            message: reactionState.user_reacted ? 'Reaction recorded' : 'Reaction removed',
+            data: {
+                reactions: normalizeReactions(target.reactions),
+                user_reacted: reactionState.user_reacted,
+                active_reaction: reactionState.active_reaction,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Reply to a blog comment
+ * @route   POST /api/blogs/:id/comments/:commentId/replies
+ * @access  Public
+ */
+const addCommentReply = async (req, res, next) => {
+    try {
+        const { id, commentId } = req.params;
+        const { name, email, content } = req.body;
+
+        if (!name?.trim() || !email?.trim() || !content?.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name, email, and reply are required',
+            });
+        }
+
+        const blog = await blogRepository.findById(id);
+        if (!blog || blog.status !== 'published') {
+            return res.status(404).json({
+                success: false,
+                message: 'Blog not found',
+            });
+        }
+
+        const comment = blog.comments.id(commentId);
+        if (!comment || comment.status !== 'approved') {
+            return res.status(404).json({
+                success: false,
+                message: 'Comment not found',
+            });
+        }
+
+        const reply = {
+            user_name: name.trim(),
+            user_email: email.trim(),
+            content: content.trim(),
+            status: 'approved',
+            reactions: { like: 0, love: 0, celebrate: 0 },
+            reacted_users: [],
+        };
+
+        comment.replies.push(reply);
+        await blog.save();
+
+        const savedReply = comment.replies[comment.replies.length - 1];
+        const publicReply = {
+            ...savedReply.toObject(),
+            reactions: normalizeReactions(savedReply.reactions),
+        };
+
+        res.status(201).json({
+            success: true,
+            message: 'Reply posted successfully',
+            data: publicReply,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Record a blog view (once per browser session on the client)
+ * @route   POST /api/blogs/:id/view
+ * @access  Public
+ */
+const recordBlogView = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const blog = await blogRepository.findById(id);
+        if (!blog || blog.status !== 'published') {
+            return res.status(404).json({
+                success: false,
+                message: 'Blog not found',
+            });
+        }
+
+        await blogRepository.incrementViewCount(id);
+        const updatedBlog = await blogRepository.findById(id);
+
+        res.json({
+            success: true,
+            data: {
+                view_count: updatedBlog.view_count || 0,
+            },
         });
     } catch (error) {
         next(error);
@@ -560,6 +995,47 @@ const getBlogStats = async (req, res, next) => {
     }
 };
 
+const getBlogPageSettings = async (req, res, next) => {
+    try {
+        let settings = await BlogSettings.findOne();
+        if (!settings) {
+            settings = await BlogSettings.create({});
+        }
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateBlogPageSettings = async (req, res, next) => {
+    try {
+        let settings = await BlogSettings.findOne();
+        const payload = {
+            breadcrumb_title: req.body.breadcrumb_title,
+            detail_breadcrumb_title: req.body.detail_breadcrumb_title,
+            homepage_sub_title: req.body.homepage_sub_title,
+            homepage_heading_before: req.body.homepage_heading_before,
+            homepage_heading_highlight: req.body.homepage_heading_highlight,
+            homepage_description: req.body.homepage_description,
+            homepage_button_text: req.body.homepage_button_text,
+        };
+
+        if (settings) {
+            settings = await BlogSettings.findByIdAndUpdate(settings._id, payload, { new: true });
+        } else {
+            settings = await BlogSettings.create(payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Blog page settings updated',
+            data: settings,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getAllBlogs,
     getAllBlogsAdmin,
@@ -574,6 +1050,12 @@ module.exports = {
     getPopularBlogs,
     getBlogsByYear,
     addComment,
+    reactToBlog,
+    reactToComment,
+    addCommentReply,
+    recordBlogView,
     getRelatedBlogs,
-    getBlogStats
+    getBlogStats,
+    getBlogPageSettings,
+    updateBlogPageSettings,
 };

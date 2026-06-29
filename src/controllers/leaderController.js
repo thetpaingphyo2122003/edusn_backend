@@ -1,6 +1,7 @@
 // src/controllers/leaderController.js
 const leaderRepository = require('../repositories/leaderRepository');
-const { uploadImage, deleteImage } = require('../services/uploadService');  
+const { uploadImage, deleteImage } = require('../services/uploadService');
+const NotificationService = require('../services/notificationService');
 /**
  * @desc    Get all active leaders (for public)
  * @route   GET /api/leaders
@@ -101,6 +102,10 @@ const createLeader = async (req, res, next) => {
             status: req.body.status || 'active'
         });
         
+        NotificationService.leaderCreated(leader, req.user._id).catch((err) =>
+            console.error('Leader notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Leader created successfully',
@@ -214,13 +219,12 @@ const toggleLeaderStatus = async (req, res, next) => {
             });
         }
         
-        // ✅ status ကို active/inactive လို့ သုံးမယ်
-        const newStatus = leader.is_active === true ? false : true;
-        const updatedLeader = await leaderRepository.updateById(id, { is_active: newStatus });
+        const newStatus = leader.status === 'active' ? 'inactive' : 'active';
+        const updatedLeader = await leaderRepository.updateById(id, { status: newStatus });
         
         res.json({
             success: true,
-            message: `Leader ${newStatus ? 'activated' : 'deactivated'} successfully`,
+            message: `Leader ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`,
             data: updatedLeader
         });
     } catch (error) {

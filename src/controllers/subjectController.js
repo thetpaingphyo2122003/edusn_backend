@@ -1,5 +1,7 @@
 // src/controllers/subjectController.js
 const subjectRepository = require('../repositories/subjectRepository');
+const SubjectSettings = require('../models/SubjectSettings');
+const NotificationService = require('../services/notificationService');
 
 /**
  * @desc    Get all subjects (with filter by category)
@@ -127,15 +129,22 @@ const createSubject = async (req, res, next) => {
         
         const subject = await subjectRepository.create({
             category: req.body.category,
+            year: req.body.year || null,
             title: req.body.title,
             age_range: req.body.age_range || null,
             description: req.body.description || null,
             content: req.body.content || null,
             image: image,
+            subject_group: req.body.subject_group || null,
+            list_column: req.body.list_column ? parseInt(req.body.list_column, 10) : null,
             display_order: parseInt(req.body.display_order) || 0,
             status: req.body.status || 'active'
         });
         
+        NotificationService.subjectCreated(subject, req.user._id).catch((err) =>
+            console.error('Subject notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Subject created successfully',
@@ -173,11 +182,16 @@ const updateSubject = async (req, res, next) => {
         
         const updatedSubject = await subjectRepository.updateById(id, {
             category: req.body.category || existingSubject.category,
+            year: req.body.year !== undefined ? (req.body.year || null) : existingSubject.year,
             title: req.body.title || existingSubject.title,
             age_range: req.body.age_range !== undefined ? req.body.age_range : existingSubject.age_range,
             description: req.body.description !== undefined ? req.body.description : existingSubject.description,
             content: req.body.content !== undefined ? req.body.content : existingSubject.content,
             image: image,
+            subject_group: req.body.subject_group !== undefined ? (req.body.subject_group || null) : existingSubject.subject_group,
+            list_column: req.body.list_column !== undefined
+                ? (req.body.list_column ? parseInt(req.body.list_column, 10) : null)
+                : existingSubject.list_column,
             display_order: req.body.display_order !== undefined ? parseInt(req.body.display_order) : existingSubject.display_order,
             status: req.body.status || existingSubject.status
         });
@@ -276,8 +290,83 @@ const reorderSubjects = async (req, res, next) => {
     }
 };
 
+/**
+ * @desc    Get all subjects for admin (including inactive)
+ * @route   GET /api/subjects/admin/all
+ * @access  Private (Admin)
+ */
+const getAllSubjectsAdmin = async (req, res, next) => {
+    try {
+        const { category, status, search } = req.query;
+        const filter = {};
+
+        if (category && category !== 'all') filter.category = category;
+        if (status && status !== 'all') filter.status = status;
+
+        let subjects;
+        if (search) {
+            subjects = await subjectRepository.model.find({
+                $or: [
+                    { title: { $regex: search, $options: 'i' } },
+                    { description: { $regex: search, $options: 'i' } },
+                ],
+                ...filter,
+            }).sort({ display_order: 1, createdAt: -1 });
+        } else {
+            subjects = await subjectRepository.findAllForAdmin(filter);
+        }
+
+        res.json({
+            success: true,
+            count: subjects.length,
+            data: subjects,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const getSubjectPageSettings = async (req, res, next) => {
+    try {
+        let settings = await SubjectSettings.findOne();
+        if (!settings) {
+            settings = await SubjectSettings.create({});
+        }
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateSubjectPageSettings = async (req, res, next) => {
+    try {
+        let settings = await SubjectSettings.findOne();
+        const payload = {
+            key_stage_1: req.body.key_stage_1,
+            key_stage_2: req.body.key_stage_2,
+            lower_secondary: req.body.lower_secondary,
+            upper_secondary: req.body.upper_secondary,
+        };
+
+        if (settings) {
+            settings = await SubjectSettings.findByIdAndUpdate(settings._id, payload, { new: true });
+        } else {
+            settings = await SubjectSettings.create(payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Subject page settings updated',
+            data: settings,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getAllSubjects,
+    getAllSubjectsAdmin,
     getSubjectById,
     getKeyStage1,
     getKeyStage2,
@@ -286,5 +375,7 @@ module.exports = {
     updateSubject,
     deleteSubject,
     toggleSubjectStatus,
-    reorderSubjects
+    reorderSubjects,
+    getSubjectPageSettings,
+    updateSubjectPageSettings,
 };

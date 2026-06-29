@@ -10,6 +10,7 @@ const {
     getMission,
     getStatistics,
     getAttendingVirtually,
+    getCta,
     getAllSiteContent,
     getSiteContentByKey,
     updateHero,
@@ -18,19 +19,22 @@ const {
     updateMission,
     updateStatistics,
     updateAttendingVirtually,
+    updateCta,
     deleteSiteContent
 } = require('../controllers/siteContentController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { validateUploadedFile } = require('../utils/fileValidation');
 
 // Use memory storage (not disk storage) to work with uploadService
 const storage = multer.memoryStorage();
 
 // File filter for images only
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    try {
+        validateUploadedFile(file, 'image');
         cb(null, true);
-    } else {
-        cb(new Error('Only image files are allowed'), false);
+    } catch (error) {
+        cb(error, false);
     }
 };
 
@@ -47,6 +51,7 @@ router.get('/culture', getCulture);
 router.get('/mission', getMission);
 router.get('/statistics', getStatistics);
 router.get('/attending-virtually', getAttendingVirtually);
+router.get('/cta', getCta);
 router.get('/all', getAllSiteContent);
 router.get('/:sectionKey', getSiteContentByKey);
 
@@ -57,6 +62,7 @@ router.put('/culture', protect, authorize('admin', 'super_admin'), upload.single
 router.put('/mission', protect, authorize('admin', 'super_admin'), upload.single('image'), updateMission);
 router.put('/statistics', protect, authorize('admin', 'super_admin'), updateStatistics);
 router.put('/attending-virtually', protect, authorize('admin', 'super_admin'), updateAttendingVirtually);
+router.put('/cta', protect, authorize('admin', 'super_admin'), upload.single('image'), updateCta);
 router.delete('/:sectionKey', protect, authorize('admin', 'super_admin'), deleteSiteContent);
 
 module.exports = router;

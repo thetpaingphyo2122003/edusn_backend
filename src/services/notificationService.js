@@ -1,26 +1,22 @@
-const Notification = require('../models/Notification');
+const { createAndBroadcast } = require('../utils/notificationEmitter');
 
 class NotificationService {
     /**
-     * Create a notification
+     * Create a notification and broadcast to connected admins
      * @param {Object} data - Notification data
      * @returns {Promise<Object>} Created notification
      */
     static async create(data) {
         try {
-            const notification = new Notification({
+            return await createAndBroadcast({
                 type: data.type,
                 title: data.title,
                 message: data.message,
                 link: data.link,
                 reference_id: data.reference_id || null,
                 reference_model: data.reference_model || null,
-                created_by: data.created_by || null,
-                read: false
+                created_by: data.created_by || null
             });
-            
-            await notification.save();
-            return notification;
         } catch (error) {
             console.error('Error creating notification:', error);
             return null;
@@ -217,6 +213,40 @@ class NotificationService {
             title: 'Site Content Updated',
             message: `${sectionNames[sectionKey] || sectionKey} section content has been updated.`,
             link: '/admin/site-content',
+            created_by: userId
+        });
+    }
+
+    static async announcementCreated({ title, message, link }, userId) {
+        return await this.create({
+            type: 'announcement',
+            title,
+            message,
+            link: link || '/admin/dashboard',
+            created_by: userId
+        });
+    }
+
+    static async subjectCreated(subject, userId) {
+        return await this.create({
+            type: 'subject',
+            title: 'New Subject Added',
+            message: `Subject "${subject.name || subject.title}" has been added.`,
+            link: '/admin/subjects',
+            reference_id: subject._id,
+            reference_model: 'ContentList',
+            created_by: userId
+        });
+    }
+
+    static async timetableCreated(timetable, userId) {
+        return await this.create({
+            type: 'timetable',
+            title: 'Timetable Updated',
+            message: `Timetable entry "${timetable.title || timetable.name || 'schedule'}" has been added.`,
+            link: '/admin/timetable',
+            reference_id: timetable._id,
+            reference_model: 'Timetable',
             created_by: userId
         });
     }

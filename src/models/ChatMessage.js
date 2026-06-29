@@ -39,7 +39,8 @@
         name: { type: String, default: null },
         size: { type: String, default: null },
         type: { type: String, default: null },
-        mimeType: { type: String, default: null }
+        mimeType: { type: String, default: null },
+        caption: { type: String, default: null }
     });
 
     // Attachment Schema (embedded)

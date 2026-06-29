@@ -3,11 +3,17 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
+const { authLimiter, otpLimiter } = require('../middleware/securityMiddleware');
 
 // Public routes (no authentication required)
-router.post('/register', authController.register);
-router.post('/login', authController.login);
-router.post('/refresh', authController.refreshToken);
+router.post('/register', authLimiter, authController.register);
+router.post('/login', authLimiter, authController.login);
+router.post('/refresh', authLimiter, authController.refreshToken);
+router.get('/check-username', authController.checkUsernameAvailability);
+router.post('/verify-email-otp', otpLimiter, authController.verifyEmailOtp);
+router.post('/resend-email-otp', otpLimiter, authController.resendEmailOtp);
+router.post('/forgot-password', otpLimiter, authController.forgotPassword);
+router.post('/reset-password', otpLimiter, authController.resetPassword);
 
 // Protected routes (authentication required)
 router.get('/me', protect, authController.getMe);

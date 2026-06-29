@@ -1,5 +1,7 @@
 const igcseCourseRepository = require('../repositories/igcseCourseRepository');
+const IgcseCourseSettings = require('../models/IgcseCourseSettings');
 const { uploadImage, deleteImage } = require('../services/uploadService');
+const NotificationService = require('../services/notificationService');
 
 // Helper function to extract public ID from Cloudinary URL
 const extractPublicId = (url) => {
@@ -189,6 +191,10 @@ const createCourse = async (req, res, next) => {
         
         const course = await igcseCourseRepository.create(courseData);
         
+        NotificationService.courseCreated(course, req.user._id).catch((err) =>
+            console.error('Course notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Course created successfully',
@@ -399,6 +405,43 @@ const reorderCourses = async (req, res, next) => {
     }
 };
 
+const getCoursePageSettings = async (req, res, next) => {
+    try {
+        let settings = await IgcseCourseSettings.findOne();
+        if (!settings) {
+            settings = await IgcseCourseSettings.create({});
+        }
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateCoursePageSettings = async (req, res, next) => {
+    try {
+        let settings = await IgcseCourseSettings.findOne();
+        const payload = {
+            parent_breadcrumb_title: req.body.parent_breadcrumb_title,
+            parent_breadcrumb_path: req.body.parent_breadcrumb_path,
+            show_parent_in_breadcrumb: req.body.show_parent_in_breadcrumb,
+        };
+
+        if (settings) {
+            settings = await IgcseCourseSettings.findByIdAndUpdate(settings._id, payload, { new: true });
+        } else {
+            settings = await IgcseCourseSettings.create(payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Course page settings updated',
+            data: settings,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     getAllCourses,
     getAllCoursesAdmin,
@@ -411,5 +454,7 @@ module.exports = {
     deleteCourse,
     updateCourseTabs,
     toggleCourseStatus,
-    reorderCourses
+    reorderCourses,
+    getCoursePageSettings,
+    updateCoursePageSettings,
 };

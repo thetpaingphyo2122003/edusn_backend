@@ -4,15 +4,17 @@ const router = express.Router();
 const multer = require('multer');
 const contentListController = require('../controllers/contentListController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { validateUploadedFile } = require('../utils/fileValidation');
 
 // Configure multer for memory storage (to work with uploadService)
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    try {
+        validateUploadedFile(file, 'image');
         cb(null, true);
-    } else {
-        cb(new Error('Only image files are allowed'), false);
+    } catch (error) {
+        cb(error, false);
     }
 };
 

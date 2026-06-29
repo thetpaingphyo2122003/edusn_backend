@@ -1,8 +1,8 @@
 // src/socket/chatSocket.js
 const chatRoomRepository = require('../repositories/chatRoomRepository');
 const chatMessageRepository = require('../repositories/chatMessageRepository');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { canAccessRoom, isSupportRoom } = require('../utils/chatHelpers');
 
 // Online Users: userId -> { socketId, name, role, currentRoom }
 const onlineUsers = new Map();
@@ -16,117 +16,119 @@ class ChatSocket {
 
     initializeEvents() {
         this.io.on('connection', (socket) => {
-            console.log('✅ New client connected:', socket.id);
-            
-            let token = socket.handshake.query.token;
-            
-            if (!token && socket.handshake.auth.token) {
-                token = socket.handshake.auth.token;
-            }
-            
-            if (!token && socket.handshake.headers.authorization) {
-                const authHeader = socket.handshake.headers.authorization;
-                if (authHeader && authHeader.startsWith('Bearer ')) {
-                    token = authHeader.split(' ')[1];
-                }
-            }
-            
-            if (!token) {
-                console.log('❌ No token found, disconnecting');
+            if (!socket.user) {
                 socket.disconnect();
                 return;
             }
-            
-            jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-                if (err) {
-                    console.error('❌ Token verification failed:', err.message);
-                    socket.disconnect();
-                    return;
-                }
-                
-                try {
-                    const user = await User.findById(decoded.id).select('-password');
-                    
-                    if (!user) {
-                        console.log('❌ User not found');
-                        socket.disconnect();
-                        return;
-                    }
-                    
-                    socket.user = user;
-                    const userId = user._id.toString();
-                    const senderName = user.full_name || user.username || 'User';
-                    
-                    // Store online user
-                    onlineUsers.set(userId, {
-                        socketId: socket.id,
-                        name: senderName,
-                        role: user.role,
-                        currentRoom: null,
-                        lastSeen: new Date()
-                    });
-                    
-                    // Broadcast to ALL users that this user is online
-                    this.io.emit('user_online', {
-                        user_id: userId,
-                        name: senderName,
-                        role: user.role,
-                        timestamp: new Date()
-                    });
-                    
-                    // Send current online users list to this user
-                    const onlineList = Array.from(onlineUsers.entries()).map(([id, data]) => ({
-                        user_id: id,
-                        name: data.name,
-                        role: data.role
-                    }));
-                    socket.emit('online_users_list', { users: onlineList });
-                    
-                    // Handle events
-                    this.handleJoinRoom(socket, userId, senderName);
-                    this.handleLeaveRoom(socket, userId, senderName);
-                    this.handleSendMessage(socket, senderName);
-                    this.handleTyping(socket, userId, senderName);
-                    this.handleMarkSeen(socket, userId, senderName);
-                    this.handleDisconnect(socket, userId, senderName);
-                    
-                } catch (error) {
-                    console.error('❌ Error:', error);
-                    socket.disconnect();
-                }
+
+            if (process.env.NODE_ENV !== 'production') {
+                console.log('✅ New authenticated client connected:', socket.id);
+            }
+
+            const user = socket.user;
+            const userId = user._id.toString();
+            const senderName = user.full_name || user.username || 'User';
+
+            if (['admin', 'super_admin', 'staff', 'editor'].includes(user.role)) {
+                socket.join('admin_notifications');
+            }
+
+            onlineUsers.set(userId, {
+                socketId: socket.id,
+                name: senderName,
+                role: user.role,
+                currentRoom: null,
+                lastSeen: new Date()
+            });
+
+            this.io.emit('user_online', {
+                user_id: userId,
+                name: senderName,
+                role: user.role,
+                timestamp: new Date()
+            });
+
+            const onlineList = Array.from(onlineUsers.entries()).map(([id, data]) => ({
+                user_id: id,
+                name: data.name,
+                role: data.role
+            }));
+            socket.emit('online_users_list', { users: onlineList });
+
+            this.handleJoinRoom(socket, userId, senderName);
+            this.handleLeaveRoom(socket, userId, senderName);
+            this.handleSendMessage(socket, senderName);
+            this.handleTyping(socket, userId, senderName);
+            this.handleMarkSeen(socket, userId, senderName);
+            this.handleDisconnect(socket, userId, senderName);
+
+            socket.on('get_online_users', () => {
+                const users = Array.from(onlineUsers.entries()).map(([id, data]) => ({
+                    user_id: id,
+                    name: data.name,
+                    role: data.role
+                }));
+                socket.emit('online_users_list', { users });
             });
         });
+    }
+
+    async canUseRoom(roomId, user) {
+        if (!roomId || !user) return { allowed: false, room: null };
+        const room = await chatRoomRepository.findByRoomId(roomId);
+        return { allowed: canAccessRoom(room, user), room };
     }
     
     // User joins a chat room
     handleJoinRoom(socket, userId, senderName) {
-        socket.on('join_room', (data) => {
-            const { room_id } = data;
-            
-            // Leave previous room if exists
-            const userData = onlineUsers.get(userId);
-            if (userData && userData.currentRoom) {
-                socket.leave(userData.currentRoom);
-                console.log(`📤 ${senderName} left previous room: ${userData.currentRoom}`);
+        socket.on('join_room', async (data) => {
+            const { room_id, active } = data;
+            if (!room_id) return;
+
+            const { allowed } = await this.canUseRoom(room_id, socket.user);
+            if (!allowed) {
+                socket.emit('error', { message: 'Not authorized for this room' });
+                return;
             }
-            
-            // Join new room
+
+            // Stay subscribed to all rooms for inbox realtime (do not leave previous rooms)
             socket.join(room_id);
-            onlineUsers.set(userId, {
-                ...userData,
-                currentRoom: room_id
-            });
-            
-            console.log(`📢 ${senderName} joined room: ${room_id}`);
-            socket.emit('room_joined', { room_id });
-            
-            // Notify others in room that user is active
-            socket.to(room_id).emit('user_active_in_room', {
-                user_id: userId,
+
+            const userData = onlineUsers.get(userId) || {
+                socketId: socket.id,
                 name: senderName,
-                room_id: room_id,
-                timestamp: new Date()
-            });
+                role: socket.user?.role,
+                currentRoom: null,
+                lastSeen: new Date()
+            };
+
+            const nextData = { ...userData, socketId: socket.id };
+
+            if (active !== false) {
+                const prevActive = userData.currentRoom;
+                nextData.currentRoom = room_id;
+
+                if (prevActive && prevActive !== room_id) {
+                    socket.to(prevActive).emit('user_left_room', {
+                        user_id: userId,
+                        name: senderName,
+                        room_id: prevActive,
+                        timestamp: new Date()
+                    });
+                }
+
+                socket.to(room_id).emit('user_active_in_room', {
+                    user_id: userId,
+                    name: senderName,
+                    room_id: room_id,
+                    timestamp: new Date()
+                });
+            }
+
+            onlineUsers.set(userId, nextData);
+
+            console.log(`📢 ${senderName} joined room: ${room_id}${active === false ? ' (inbox)' : ''}`);
+            socket.emit('room_joined', { room_id });
         });
     }
     
@@ -162,7 +164,9 @@ class ChatSocket {
         socket.on('send_message', async (data) => {
             const { room_id, message, message_type, replyToId } = data;
             
-            console.log(`📨 Message from ${senderName} in ${room_id}: ${message?.substring(0, 50)}`);
+            if (process.env.NODE_ENV !== 'production') {
+                console.log(`📨 Message from ${senderName} in ${room_id}`);
+            }
             
             if (!room_id || !message) {
                 socket.emit('error', { message: 'room_id and message required' });
@@ -173,13 +177,33 @@ class ChatSocket {
                 // Check if room exists, if not create it automatically
                 let room = await chatRoomRepository.findByRoomId(room_id);
                 
+                if (room && isSupportRoom(room)) {
+                    socket.emit('error', {
+                        message: 'Support chats must use the support message API'
+                    });
+                    return;
+                }
+
+                if (room && !canAccessRoom(room, socket.user)) {
+                    socket.emit('error', { message: 'Not authorized for this room' });
+                    return;
+                }
+                
                 if (!room) {
-                    console.log(`🆕 Room ${room_id} doesn't exist, creating automatically...`);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`🆕 Room ${room_id} doesn't exist, creating automatically...`);
+                    }
                     
                     const userIds = room_id.split('_');
+                    const objectIdPattern = /^[a-f\d]{24}$/i;
                     const otherUserId = userIds.find(id => id !== socket.user._id.toString());
                     
-                    if (!otherUserId) {
+                    if (
+                        userIds.length !== 2 ||
+                        !userIds.includes(socket.user._id.toString()) ||
+                        !otherUserId ||
+                        !userIds.every((id) => objectIdPattern.test(id))
+                    ) {
                         socket.emit('error', { message: 'Invalid room ID' });
                         return;
                     }
@@ -193,6 +217,8 @@ class ChatSocket {
                     room = await chatRoomRepository.create({
                         room_id: room_id,
                         room_type: 'personal',
+                        chat_type: 'personal',
+                        is_support_chat: false,
                         participants: [
                             { 
                                 user_id: socket.user._id, 
@@ -211,7 +237,9 @@ class ChatSocket {
                         ]
                     });
                     
-                    console.log(`✅ Auto-created room: ${room_id}`);
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log(`✅ Auto-created room: ${room_id}`);
+                    }
                     
                     const receiverInfo = onlineUsers.get(otherUserId);
                     if (receiverInfo) {
@@ -259,8 +287,8 @@ class ChatSocket {
                 
                 await chatRoomRepository.updateLastMessage(room_id, lastMessageText, senderName, message_type || 'text');
                 
-                // Emit to room (broadcast to all including sender)
-                this.io.to(room_id).emit('new_message', {
+                const { emitChatEventToRoom } = require('../utils/chatEmit');
+                emitChatEventToRoom(this.io, room, 'new_message', {
                     success: true,
                     data: newMessage
                 });
@@ -280,6 +308,9 @@ class ChatSocket {
             if (!message_ids || message_ids.length === 0) return;
             
             try {
+                const { allowed } = await this.canUseRoom(room_id, socket.user);
+                if (!allowed) return;
+
                 // Update each message's read_by array
                 await chatMessageRepository.updateMany(
                     { 
@@ -304,7 +335,9 @@ class ChatSocket {
                     seen_at: new Date()
                 });
                 
-                console.log(`👁️ ${senderName} seen ${message_ids.length} messages in ${room_id}`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`👁️ ${senderName} seen ${message_ids.length} messages in ${room_id}`);
+                }
                 
             } catch (error) {
                 console.error('Mark seen error:', error);
@@ -314,8 +347,10 @@ class ChatSocket {
     
     // Typing indicator
     handleTyping(socket, userId, senderName) {
-        socket.on('typing_start', (data) => {
+        socket.on('typing_start', async (data) => {
             const { room_id } = data;
+            const { allowed } = await this.canUseRoom(room_id, socket.user);
+            if (!allowed) return;
             
             const existing = typingUsers.get(room_id);
             if (existing && existing.userId === userId) {
@@ -339,8 +374,10 @@ class ChatSocket {
             });
         });
         
-        socket.on('typing_stop', (data) => {
+        socket.on('typing_stop', async (data) => {
             const { room_id } = data;
+            const { allowed } = await this.canUseRoom(room_id, socket.user);
+            if (!allowed) return;
             
             const existing = typingUsers.get(room_id);
             if (existing && existing.userId === userId) {
@@ -382,7 +419,9 @@ class ChatSocket {
                     }
                 }
                 
-                console.log(`❌ ${senderName} disconnected`);
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`❌ ${senderName} disconnected`);
+                }
             }
         });
     }

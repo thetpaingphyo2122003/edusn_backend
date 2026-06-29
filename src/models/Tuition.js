@@ -10,6 +10,10 @@ const installmentSchema = new mongoose.Schema({
     amount: {
         type: Number,
         required: true
+    },
+    amount_usd: {
+        type: Number,
+        default: null
     }
 });
 
@@ -61,13 +65,25 @@ const tuitionSchema = new mongoose.Schema({
         type: Number,
         default: null
     },
+    total_fees_usd: {
+        type: Number,
+        default: null
+    },
     material_fees_mmk: {
         type: Number,
         default: 0
     },
+    material_fees_usd: {
+        type: Number,
+        default: null
+    },
     microsoft_fees_mmk: {
         type: Number,
         default: 0
+    },
+    microsoft_fees_usd: {
+        type: Number,
+        default: null
     },
     installments: [installmentSchema],
     installment_note: {

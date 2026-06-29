@@ -59,6 +59,26 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    email_verified: {
+        type: Boolean,
+        default: false
+    },
+    email_verification_otp: {
+        type: String,
+        default: null
+    },
+    email_verification_otp_expires_at: {
+        type: Date,
+        default: null
+    },
+    reset_password_otp: {
+        type: String,
+        default: null
+    },
+    reset_password_otp_expires_at: {
+        type: Date,
+        default: null
+    },
     created_by: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

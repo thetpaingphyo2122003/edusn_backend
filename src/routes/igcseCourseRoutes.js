@@ -7,6 +7,7 @@ const upload = require('../middleware/uploadMiddleware');
 
 // ==================== PUBLIC ROUTES ====================
 // Specific routes FIRST (before dynamic :slug)
+router.get('/page-settings', igcseCourseController.getCoursePageSettings);
 router.get('/igcse', igcseCourseController.getIGCSECourses);
 router.get('/a-level', igcseCourseController.getALevelCourses);
 router.get('/id/:id', igcseCourseController.getCourseById);
@@ -19,6 +20,7 @@ router.get('/:slug', igcseCourseController.getCourseBySlug);
 
 // ==================== ADMIN ROUTES ====================
 router.get('/admin/all', protect, authorize('admin'), igcseCourseController.getAllCoursesAdmin);
+router.put('/page-settings', protect, authorize('admin'), igcseCourseController.updateCoursePageSettings);
 router.post('/', protect, authorize('admin'), upload.single('image'), igcseCourseController.createCourse);
 router.put('/:id', protect, authorize('admin'), upload.single('image'), igcseCourseController.updateCourse);
 router.put('/:id/tabs', protect, authorize('admin'), igcseCourseController.updateCourseTabs);

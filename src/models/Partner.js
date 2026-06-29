@@ -11,6 +11,15 @@ const socialLinksSchema = new mongoose.Schema({
     linkedin: { type: String, default: null }
 });
 
+const programRowSchema = new mongoose.Schema({
+    no: { type: Number, default: 1 },
+    programs: { type: String, default: null },
+    intakes: { type: String, default: null },
+    duration: { type: String, default: null },
+    requirements: { type: String, default: null },
+    fees: { type: String, default: null }
+}, { _id: false });
+
 // Main Partner Schema
 const partnerSchema = new mongoose.Schema({
     type: {
@@ -19,6 +28,10 @@ const partnerSchema = new mongoose.Schema({
         default: 'university'
     },
     name: {
+        type: String,
+        default: null
+    },
+    description: {
         type: String,
         default: null
     },
@@ -33,6 +46,34 @@ const partnerSchema = new mongoose.Schema({
     website_url: {
         type: String,
         default: null
+    },
+    pathway_tab_label: {
+        type: String,
+        default: null
+    },
+    foundation_url: {
+        type: String,
+        default: null
+    },
+    bachelor_url: {
+        type: String,
+        default: null
+    },
+    map_url: {
+        type: String,
+        default: null
+    },
+    calendly_url: {
+        type: String,
+        default: null
+    },
+    foundation_programs: {
+        type: [programRowSchema],
+        default: []
+    },
+    bachelor_programs: {
+        type: [programRowSchema],
+        default: []
     },
     social_links: {
         type: socialLinksSchema,
@@ -71,6 +112,34 @@ const partnerSchema = new mongoose.Schema({
         default: null
     },
     content: {
+        type: String,
+        default: null
+    },
+    email: {
+        type: String,
+        default: null
+    },
+    phone: {
+        type: String,
+        default: null
+    },
+    location: {
+        type: String,
+        default: null
+    },
+    founded: {
+        type: String,
+        default: null
+    },
+    institution_type: {
+        type: String,
+        default: null
+    },
+    global_ranking: {
+        type: String,
+        default: null
+    },
+    local_ranking: {
         type: String,
         default: null
     },

@@ -43,6 +43,12 @@ const errorHandler = (err, req, res, next) => {
         error.statusCode = 401;
     }
 
+    // SMTP / email delivery error
+    if (err.code === 'EAUTH' || /535|BadCredentials|SMTP/i.test(err.message || '')) {
+        error.message = 'We could not send OTP right now. Please try again later.';
+        error.statusCode = 503;
+    }
+
     const statusCode = error.statusCode || 500;
     const message = error.message || 'Something went wrong on the server';
 

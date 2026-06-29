@@ -11,7 +11,8 @@ router.get('/universities', partnerController.getUniversities);
 router.get('/progression-routes', partnerController.getProgressionRoutes);
 router.get('/search', partnerController.searchProgressionRoutes);
 
-// 2. Admin reorder route
+// 2. Admin routes
+router.get('/admin/all', protect, authorize('admin'), partnerController.getAllPartnersAdmin);
 router.put('/reorder', protect, authorize('admin'), partnerController.reorderPartners);
 
 // 3. General GET all

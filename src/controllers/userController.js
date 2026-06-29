@@ -14,26 +14,34 @@
     const getAllUsers = async (req, res, next) => {
         try {
             const { page = 1, limit = 10, role, status, search } = req.query;
-            let filter = {};
-            
-            // Staff can only search, not get all users
-            if (req.user.role === 'staff') {
-                if (!search) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Staff can only search for users, not list all'
-                    });
-                }
+            const privilegedRoles = ['admin', 'super_admin'];
+            const canListAll = privilegedRoles.includes(req.user.role);
+            const normalizedSearch = String(search || '').trim();
+
+            if (!canListAll && !normalizedSearch) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Search is required to look up users'
+                });
             }
+
+            if (normalizedSearch.length > 100) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Search query is too long'
+                });
+            }
+
+            let filter = {};
             
             if (role && role !== 'all') filter.role = role;
             if (status && status !== 'all') filter.status = status;
             
-            if (search) {
+            if (normalizedSearch) {
                 filter.$or = [
-                    { username: { $regex: search, $options: 'i' } },
-                    { email: { $regex: search, $options: 'i' } },
-                    { full_name: { $regex: search, $options: 'i' } }
+                    { username: { $regex: normalizedSearch, $options: 'i' } },
+                    { email: { $regex: normalizedSearch, $options: 'i' } },
+                    { full_name: { $regex: normalizedSearch, $options: 'i' } }
                 ];
             }
             
@@ -72,6 +80,16 @@
     const getUserById = async (req, res, next) => {
         try {
             const { id } = req.params;
+            const privilegedRoles = ['admin', 'super_admin', 'staff'];
+            const isSelf = req.user._id.toString() === id;
+
+            if (!isSelf && !privilegedRoles.includes(req.user.role)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Not authorized to view this user'
+                });
+            }
+
             const user = await userRepository.findById(id);
             
             if (!user) {

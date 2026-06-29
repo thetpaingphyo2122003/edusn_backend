@@ -14,6 +14,13 @@ class TuitionRepository extends BaseRepository {
         );
     }
 
+    async findAllFeesAdmin() {
+        return await this.findAll(
+            { type: 'fee' },
+            { sort: { category: 1, display_order: 1 } }
+        );
+    }
+
     async findByCategory(category) {
         return await this.findAll(
             { category, type: 'fee', status: 'active' },

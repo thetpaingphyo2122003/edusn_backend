@@ -5,7 +5,7 @@ const siteContentSchema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
-        enum: ['hero', 'about', 'culture', 'statistics', 'attending_virtually']
+        enum: ['hero', 'about', 'culture', 'mission', 'statistics', 'attending_virtually', 'cta']
     },
     title: {
         type: String,

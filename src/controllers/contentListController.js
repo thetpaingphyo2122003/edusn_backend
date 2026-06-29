@@ -61,11 +61,12 @@ const getMissions = async (req, res, next) => {
         // Format missions to match original HTML structure
         const formattedMissions = missions.map((mission, index) => ({
             id: mission._id,
-            number: String(index + 1).padStart(2, '0'),
+            number: String(mission.display_order || index + 1).padStart(2, '0'),
             title: mission.title,
             description: mission.description,
             icon: mission.icon || null,
-            image: mission.image || null
+            image: mission.image || null,
+            video_url: mission.extra_data?.video_url || null
         }));
         
         res.json({

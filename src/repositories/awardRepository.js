@@ -10,7 +10,7 @@ class AwardRepository extends BaseRepository {
     async findByAcademicYear(year) {
         return await this.findAll(
             { academic_year: year, status: 'active' },
-            { sort: { campus: 1, display_order: 1 } }
+            { sort: { display_order: 1, campus: 1 } }
         );
     }
 
@@ -21,27 +21,36 @@ class AwardRepository extends BaseRepository {
     }
 
     async findTeacherAwards(year) {
-        return await this.findAll(
-            { award_category: 'Students Favorite Teacher Award', academic_year: year },
-            { sort: { campus: 1 } }
-        );
+        const filter = {
+            academic_year: year,
+            status: 'active',
+            teacher_name: { $ne: null },
+        };
+        return await this.findAll(filter, { sort: { campus: 1, display_order: 1 } });
     }
 
     async findStudentAwards(year) {
         return await this.findAll(
-            { award_category: { $ne: 'Students Favorite Teacher Award' }, academic_year: year },
-            { sort: { campus: 1, award_category: 1 } }
+            {
+                academic_year: year,
+                status: 'active',
+                student_name: { $ne: null },
+            },
+            { sort: { campus: 1, award_category: 1, display_order: 1 } }
         );
     }
 
-    // ✅ NEW: Get ALL awards for admin (both active and inactive)
     async findAllForAdmin(filter = {}) {
-        return await this.findAll(filter, { sort: { createdAt: -1 } });
+        return await this.findAll(filter, { sort: { academic_year: -1, display_order: 1, createdAt: -1 } });
     }
 
-    // ✅ NEW: Get awards by status
     async findByStatus(status) {
         return await this.findAll({ status }, { sort: { createdAt: -1 } });
+    }
+
+    async getAvailableYears(activeOnly = true) {
+        const filter = activeOnly ? { status: 'active' } : {};
+        return Award.distinct('academic_year', filter);
     }
 }
 

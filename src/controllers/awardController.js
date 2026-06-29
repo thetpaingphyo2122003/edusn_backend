@@ -1,5 +1,10 @@
 // src/controllers/awardController.js
 const awardRepository = require('../repositories/awardRepository');
+const AwardSettings = require('../models/AwardSettings');
+const NotificationService = require('../services/notificationService');
+
+const isTeacherAwardCategory = (category = '') =>
+    category.replace(/['’]/g, '').toLowerCase().includes('favorite teacher');
 
 /**
  * @desc    Get all awards (PUBLIC - active only)
@@ -18,13 +23,92 @@ const getAllAwards = async (req, res, next) => {
         } else if (campus) {
             awards = await awardRepository.findByCampus(campus);
         } else {
-            awards = await awardRepository.findAll({ status: 'active' });
+            awards = await awardRepository.findAll({ status: 'active' }, { sort: { academic_year: -1, display_order: 1 } });
         }
         
         res.json({
             success: true,
             count: awards.length,
             data: awards
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const sortYearsDesc = (years) =>
+    [...new Set(years.filter(Boolean))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+
+const getAvailableYears = async (req, res, next) => {
+    try {
+        const [awardYears, settings] = await Promise.all([
+            awardRepository.getAvailableYears(true),
+            AwardSettings.findOne().lean(),
+        ]);
+        const years = sortYearsDesc([
+            ...awardYears,
+            settings?.default_academic_year,
+        ]);
+        res.json({
+            success: true,
+            data: years,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const getAdminAvailableYears = async (req, res, next) => {
+    try {
+        const [awardYears, settings] = await Promise.all([
+            awardRepository.getAvailableYears(false),
+            AwardSettings.findOne().lean(),
+        ]);
+        const years = sortYearsDesc([
+            ...awardYears,
+            settings?.default_academic_year,
+        ]);
+        res.json({
+            success: true,
+            data: years,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const getAwardPageSettings = async (req, res, next) => {
+    try {
+        let settings = await AwardSettings.findOne();
+        if (!settings) {
+            settings = await AwardSettings.create({});
+        }
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateAwardPageSettings = async (req, res, next) => {
+    try {
+        let settings = await AwardSettings.findOne();
+        const payload = {
+            breadcrumb_title: req.body.breadcrumb_title,
+            default_academic_year: req.body.default_academic_year,
+            page_intro: req.body.page_intro,
+            category_sections: req.body.category_sections,
+        };
+
+        if (settings) {
+            settings = await AwardSettings.findByIdAndUpdate(settings._id, payload, { new: true });
+        } else {
+            settings = await AwardSettings.create(payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Award page settings updated',
+            data: settings,
         });
     } catch (error) {
         next(error);
@@ -259,7 +343,7 @@ const createAward = async (req, res, next) => {
         }
         
         // Validate based on award type
-        if (award_category === 'Students Favorite Teacher Award') {
+        if (isTeacherAwardCategory(award_category)) {
             if (!teacher_name) {
                 return res.status(400).json({
                     success: false,
@@ -295,6 +379,10 @@ const createAward = async (req, res, next) => {
             status: 'active'
         });
         
+        NotificationService.awardCreated(award, req.user._id).catch((err) =>
+            console.error('Award notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Award created successfully',
@@ -511,6 +599,10 @@ const reorderAwards = async (req, res, next) => {
 module.exports = {
     getAllAwards,
     getAllAwardsAdmin,
+    getAvailableYears,
+    getAdminAvailableYears,
+    getAwardPageSettings,
+    updateAwardPageSettings,
     getAwardById,
     getAwardsByYear,
     getTeacherAwards,

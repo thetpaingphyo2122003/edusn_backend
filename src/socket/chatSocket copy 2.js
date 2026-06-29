@@ -18,10 +18,10 @@ class ChatSocket {
         this.io.on('connection', (socket) => {
             console.log('✅ New client connected:', socket.id);
             
-            let token = socket.handshake.query.token;
+            let token = socket.handshake.auth?.token;
             
-            if (!token && socket.handshake.auth.token) {
-                token = socket.handshake.auth.token;
+            if (!token && process.env.NODE_ENV !== 'production' && socket.handshake.query.token) {
+                token = socket.handshake.query.token;
             }
             
             if (!token && socket.handshake.headers.authorization) {

@@ -2,14 +2,16 @@
 const chatRoomRepository = require('../repositories/chatRoomRepository');
 const userRepository = require('../repositories/userRepository');
 const ChatMessage = require('../models/ChatMessage');
-const ChatRoom = require('../models/ChatRoom'); // ✅ ADD THIS
-const User = require('../models/User'); // ✅ ADD THIS
+const ChatRoom = require('../models/ChatRoom');
+const User = require('../models/User');
+const { isStaffRole, isSupportRoom, supportRoomQuery } = require('../utils/chatHelpers');
 
 console.log('✅ chatRoomController loaded');
 
 const getMyChatRooms = async (req, res, next) => {
     try {
-        const rooms = await chatRoomRepository.findByUserId(req.user._id);
+        const rooms = (await chatRoomRepository.findByUserId(req.user._id))
+            .filter((room) => !isSupportRoom(room));
         
         const roomsWithUnread = await Promise.all(rooms.map(async (room) => {
             const participant = room.participants.find(
@@ -62,6 +64,8 @@ const createPersonalChatRoom = async (req, res, next) => {
             room = await chatRoomRepository.create({
                 room_id: roomId,
                 room_type: 'personal',
+                chat_type: 'personal',
+                is_support_chat: false,
                 participants: [
                     { 
                         user_id: req.user._id, 
@@ -194,13 +198,12 @@ const getOrCreateSupportChat = async (req, res, next) => {
         
         // Find existing support chat
         let room = await ChatRoom.findOne({
-            chat_type: 'support',
+            ...supportRoomQuery(),
             'participants.user_id': targetUserId,
             status: 'active'
         });
         
         if (!room) {
-            // Get all staff users
             const staffUsers = await User.find({ 
                 role: { $in: ['admin', 'staff', 'super_admin'] },
                 status: 'active'
@@ -240,6 +243,35 @@ const getOrCreateSupportChat = async (req, res, next) => {
                 admins: staffUsers.map(s => s._id),
                 status: 'active'
             });
+        } else {
+            const staffUsers = await User.find({
+                role: { $in: ['admin', 'staff', 'super_admin'] },
+                status: 'active'
+            });
+
+            const existingStaffIds = new Set(
+                room.participants
+                    .filter((participant) => isStaffRole(participant.role))
+                    .map((participant) => participant.user_id.toString())
+            );
+
+            const missingStaff = staffUsers.filter(
+                (staff) => !existingStaffIds.has(staff._id.toString())
+            );
+
+            if (missingStaff.length > 0) {
+                room.participants.push(
+                    ...missingStaff.map((staff) => ({
+                        user_id: staff._id,
+                        name: staff.full_name || staff.username,
+                        role: staff.role,
+                        last_read_at: new Date(),
+                        is_muted: false
+                    }))
+                );
+                room.admins = staffUsers.map((staff) => staff._id);
+                await room.save();
+            }
         }
         
         res.json({ success: true, data: room });
@@ -257,13 +289,13 @@ const getOrCreateSupportChat = async (req, res, next) => {
 const getSupportChatsForStaff = async (req, res, next) => {
     try {
         // Check if user is staff
-        const isStaff = ['admin', 'staff', 'super_admin'].includes(req.user.role);
+        const isStaff = isStaffRole(req.user.role);
         if (!isStaff) {
             return res.status(403).json({ success: false, message: 'Access denied. Staff only.' });
         }
         
         const rooms = await ChatRoom.find({
-            chat_type: 'support',
+            ...supportRoomQuery(),
             status: 'active'
         }).sort({ updatedAt: -1 });
         
@@ -283,7 +315,7 @@ const getSupportChatsForStaff = async (req, res, next) => {
             
             // Get user info (the one who opened the ticket)
             const userParticipant = room.participants.find(
-                p => p.role === 'viewer' || p.role === 'user'
+                (participant) => !isStaffRole(participant.role)
             );
             
             return {
@@ -309,7 +341,7 @@ const getSupportChatsForStaff = async (req, res, next) => {
 const getMySupportChats = async (req, res, next) => {
     try {
         const rooms = await ChatRoom.find({
-            chat_type: 'support',
+            ...supportRoomQuery(),
             'participants.user_id': req.user._id,
             status: 'active'
         }).sort({ updatedAt: -1 });

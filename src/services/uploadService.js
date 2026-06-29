@@ -1,6 +1,45 @@
 // src/services/uploadService.js
+const fs = require('fs').promises;
+const path = require('path');
 const cloudinary = require('../config/cloudinary');
 const sharp = require('sharp');
+
+const uploadsRoot = path.join(__dirname, '../../uploads');
+
+const buildLocalFilename = (originalname) => {
+    const name = (originalname || 'file').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const ext = path.extname(name).toLowerCase();
+    const base = path.basename(name, ext) || 'file';
+    const suffix = Date.now().toString(36);
+    return ext ? `${base}_${suffix}${ext}` : `${base}_${suffix}`;
+};
+
+const buildPublicFileUrl = (baseUrl, relativePath) => {
+    const base = (baseUrl || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+    return `${base}/${relativePath.replace(/^\//, '')}`;
+};
+
+const saveChatDocumentLocally = async (file, folder = 'chat/files', baseUrl) => {
+    const filename = buildLocalFilename(file.originalname);
+    const diskDir = path.resolve(uploadsRoot, folder);
+    if (!diskDir.startsWith(path.resolve(uploadsRoot))) {
+        throw new Error('Invalid upload destination');
+    }
+    await fs.mkdir(diskDir, { recursive: true });
+    await fs.writeFile(path.join(diskDir, filename), file.buffer);
+
+    const relativePath = `uploads/${folder}/${filename}`;
+    return {
+        url: buildPublicFileUrl(baseUrl, relativePath),
+        public_id: filename,
+        bytes: file.size,
+        format: path.extname(filename).slice(1) || null,
+        original_filename: file.originalname,
+        resource_type: 'local',
+        mime_type: file.mimetype,
+        storage: 'local',
+    };
+};
 
 const uploadImage = async (file, folder = 'edusn') => {
     try {
@@ -12,8 +51,7 @@ const uploadImage = async (file, folder = 'edusn') => {
         let resourceType = 'image';
         
         if (file.mimetype === 'image/svg+xml') {
-            optimizedBuffer = file.buffer;
-            resourceType = 'image';
+            throw new Error('SVG uploads are not allowed');
         } else if (file.mimetype.startsWith('image/')) {
             optimizedBuffer = await sharp(file.buffer)
                 .resize(1200, 1200, {
@@ -116,33 +154,30 @@ const uploadVideo = async (file, folder = 'edusn') => {
     }
 };
 
-const uploadFile = async (file, folder = 'edusn') => {
+const uploadFile = async (file, folder = 'edusn', baseUrl) => {
     try {
         if (!file || !file.buffer) {
             throw new Error('No file provided');
         }
-        
-        // For videos, use uploadVideo function
+
         if (file.mimetype.startsWith('video/')) {
             return await uploadVideo(file, folder);
         }
-        
+
+        const isImage = file.mimetype.startsWith('image/');
+        if (!isImage) {
+            const localFolder = folder.startsWith('chat/') ? folder : 'chat/files';
+            return saveChatDocumentLocally(file, localFolder, baseUrl);
+        }
+
         return new Promise((resolve, reject) => {
-            const uploadOptions = {
-                folder: folder,
-                resource_type: 'auto',
-                use_filename: true,
-                unique_filename: true,
-                flags: 'attachment'
-            };
-            
-            if (file.mimetype === 'application/pdf') {
-                uploadOptions.flags = 'attachment';
-                uploadOptions.format = 'pdf';
-            }
-            
             const uploadStream = cloudinary.uploader.upload_stream(
-                uploadOptions,
+                {
+                    folder: folder,
+                    resource_type: 'image',
+                    use_filename: true,
+                    unique_filename: true,
+                },
                 (error, result) => {
                     if (error) {
                         console.error('Cloudinary error:', error);
@@ -153,8 +188,10 @@ const uploadFile = async (file, folder = 'edusn') => {
                         public_id: result.public_id,
                         bytes: result.bytes,
                         format: result.format,
-                        original_filename: result.original_filename,
-                        resource_type: result.resource_type
+                        original_filename: result.original_filename || file.originalname,
+                        resource_type: result.resource_type,
+                        mime_type: file.mimetype,
+                        storage: 'cloudinary',
                     });
                 }
             );

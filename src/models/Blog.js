@@ -1,12 +1,38 @@
 // src/models/Blog.js
 const mongoose = require('mongoose');
 
+const reactionCountsSchema = new mongoose.Schema({
+    like: { type: Number, default: 0 },
+    love: { type: Number, default: 0 },
+    celebrate: { type: Number, default: 0 },
+}, { _id: false });
+
+const userReactionSchema = new mongoose.Schema({
+    user_key: { type: String, required: true },
+    reaction: { type: String, enum: ['like', 'love', 'celebrate'], required: true },
+}, { _id: false });
+
+// Reply Schema (embedded in comments)
+const replySchema = new mongoose.Schema({
+    user_name: { type: String, required: true },
+    user_email: { type: String, required: true },
+    content: { type: String, required: true },
+    status: { type: String, enum: ['pending', 'approved', 'spam'], default: 'pending' },
+    reactions: { type: reactionCountsSchema, default: () => ({}) },
+    reacted_users: [{ type: String }],
+    user_reactions: [userReactionSchema],
+}, { timestamps: true });
+
 // Comment Schema (embedded)
 const commentSchema = new mongoose.Schema({
     user_name: { type: String, required: true },
     user_email: { type: String, required: true },
     content: { type: String, required: true },
-    status: { type: String, enum: ['pending', 'approved', 'spam'], default: 'pending' }
+    status: { type: String, enum: ['pending', 'approved', 'spam'], default: 'pending' },
+    reactions: { type: reactionCountsSchema, default: () => ({}) },
+    reacted_users: [{ type: String }],
+    user_reactions: [userReactionSchema],
+    replies: [replySchema],
 }, { timestamps: true });
 
 // SEO Schema (embedded)
@@ -30,6 +56,7 @@ const blogSchema = new mongoose.Schema({
         avatar: { type: String, default: null },
         role: { type: String, default: 'Admin' }
     },
+    created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     category: { type: String, default: 'general' },
     tags: [{ type: String }],
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'draft' },
@@ -37,6 +64,9 @@ const blogSchema = new mongoose.Schema({
     view_count: { type: Number, default: 0 },
     like_count: { type: Number, default: 0 },
     share_count: { type: Number, default: 0 },
+    reactions: { type: reactionCountsSchema, default: () => ({}) },
+    reacted_users: [{ type: String }],
+    user_reactions: [userReactionSchema],
     comments: [commentSchema],
     seo: { type: seoSchema, default: () => ({}) }
 }, { timestamps: true });

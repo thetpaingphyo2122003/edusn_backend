@@ -1,5 +1,6 @@
 // src/controllers/faqController.js
 const faqRepository = require('../repositories/faqRepository');
+const NotificationService = require('../services/notificationService');
 
 /**
  * @desc    Get all active FAQs (for public website)
@@ -138,17 +139,24 @@ const searchFaqs = async (req, res, next) => {
  */
 const createFaq = async (req, res, next) => {
     try {
-        const { category, question, answer, display_order, status } = req.body;
+        const { category, question, answer, display_order, status, extra_data, type, title, content } = req.body;
         
         const faq = await faqRepository.create({
-            type: 'faq',
+            type: type || 'faq',
             category: category || 'General',
             question,
             answer,
+            title,
+            content,
+            extra_data: extra_data || null,
             display_order: display_order || 0,
             status: status || 'active'
         });
         
+        NotificationService.faqCreated(faq, req.user._id).catch((err) =>
+            console.error('FAQ notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'FAQ created successfully',
@@ -166,20 +174,22 @@ const createFaq = async (req, res, next) => {
  */
 const updateFaqPageInfo = async (req, res, next) => {
     try {
-        const { title, content } = req.body;
+        const { title, content, extra_data } = req.body;
         
         let pageInfo = await faqRepository.getPageInfo();
         
         if (pageInfo) {
             pageInfo = await faqRepository.updateById(pageInfo._id, {
                 title,
-                content
+                content,
+                extra_data: extra_data || null,
             });
         } else {
             pageInfo = await faqRepository.create({
                 type: 'page_info',
                 title,
                 content,
+                extra_data: extra_data || null,
                 status: 'active'
             });
         }
@@ -202,7 +212,7 @@ const updateFaqPageInfo = async (req, res, next) => {
 const updateFaq = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { category, question, answer, display_order, status } = req.body;
+        const { category, question, answer, display_order, status, extra_data, title, content, type } = req.body;
         
         const faq = await faqRepository.findById(id);
         
@@ -213,13 +223,20 @@ const updateFaq = async (req, res, next) => {
             });
         }
         
-        const updatedFaq = await faqRepository.updateById(id, {
-            category: category || faq.category,
-            question: question || faq.question,
-            answer: answer || faq.answer,
+        const updatePayload = {
+            category: category !== undefined ? category : faq.category,
+            question: question !== undefined ? question : faq.question,
+            answer: answer !== undefined ? answer : faq.answer,
             display_order: display_order !== undefined ? display_order : faq.display_order,
-            status: status || faq.status
-        });
+            status: status !== undefined ? status : faq.status,
+        };
+
+        if (title !== undefined) updatePayload.title = title;
+        if (content !== undefined) updatePayload.content = content;
+        if (type !== undefined) updatePayload.type = type;
+        if (extra_data !== undefined) updatePayload.extra_data = extra_data;
+
+        const updatedFaq = await faqRepository.updateById(id, updatePayload);
         
         res.json({
             success: true,

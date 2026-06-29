@@ -2,6 +2,44 @@
 const siteContentRepository = require('../repositories/siteContentRepository');
 const { uploadImage, deleteImage } = require('../services/uploadService');
 
+const parseExtraData = (value) => {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return {};
+    }
+};
+
+const formatPublicContent = (doc) => {
+    if (!doc) return null;
+    const data = doc.toObject ? doc.toObject() : { ...doc };
+    data.sub_title = data.sub_content || data.sub_title || null;
+
+    if (data.section_key === 'hero') {
+        const lines = data.extra_data?.content_lines;
+        if (Array.isArray(lines) && lines.length) {
+            data.content_lines = lines;
+        } else if (data.content) {
+            data.content_lines = data.content.split('\n').map((l) => l.trim()).filter(Boolean);
+        }
+    }
+
+    return data;
+};
+
+const uploadSectionImage = async (req, existingUrl) => {
+    if (req.file && req.file.buffer) {
+        const uploaded = await uploadImage(req.file, 'site-content');
+        return uploaded.url;
+    }
+    if (req.body.image && req.body.image !== 'undefined' && req.body.image !== 'null') {
+        return req.body.image;
+    }
+    return existingUrl || null;
+};
+
 /**
  * @desc    Get hero section content
  * @route   GET /api/site-content/hero
@@ -13,7 +51,7 @@ const getHero = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: hero
+            data: formatPublicContent(hero)
         });
     } catch (error) {
         next(error);
@@ -31,7 +69,7 @@ const getAbout = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: about
+            data: formatPublicContent(about)
         });
     } catch (error) {
         next(error);
@@ -49,7 +87,7 @@ const getCulture = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: culture
+            data: formatPublicContent(culture)
         });
     } catch (error) {
         next(error);
@@ -67,7 +105,7 @@ const getMission = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: mission
+            data: formatPublicContent(mission)
         });
     } catch (error) {
         next(error);
@@ -103,8 +141,17 @@ const getAttendingVirtually = async (req, res, next) => {
         
         res.json({
             success: true,
-            data: attendingVirtually
+            data: formatPublicContent(attendingVirtually)
         });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const getCta = async (req, res, next) => {
+    try {
+        const cta = await siteContentRepository.findOne({ section_key: 'cta' });
+        res.json({ success: true, data: formatPublicContent(cta) });
     } catch (error) {
         next(error);
     }
@@ -117,24 +164,27 @@ const getAttendingVirtually = async (req, res, next) => {
  */
 const getAllSiteContent = async (req, res, next) => {
     try {
-        const [hero, about, culture, mission, statistics, attendingVirtually] = await Promise.all([
+        const [hero, about, culture, mission, statistics, attendingVirtually, cta] = await Promise.all([
             siteContentRepository.getHero(),
             siteContentRepository.getAbout(),
             siteContentRepository.getCulture(),
             siteContentRepository.getMission(),
             siteContentRepository.getStatistics(),
-            siteContentRepository.getAttendingVirtually()
+            siteContentRepository.getAttendingVirtually(),
+            siteContentRepository.findOne({ section_key: 'cta' })
         ]);
         
         res.json({
             success: true,
             data: {
-                hero,
-                about,
-                culture,
-                mission,
-                statistics: statistics?.extra_data || null,
-                attending_virtually: attendingVirtually
+                hero: formatPublicContent(hero),
+                about: formatPublicContent(about),
+                culture: formatPublicContent(culture),
+                mission: formatPublicContent(mission),
+                statistics: statistics?.extra_data || {},
+                statistics_doc: statistics,
+                attending_virtually: formatPublicContent(attendingVirtually),
+                cta: formatPublicContent(cta)
             }
         });
     } catch (error) {
@@ -150,7 +200,7 @@ const getAllSiteContent = async (req, res, next) => {
 const getSiteContentByKey = async (req, res, next) => {
     try {
         const { sectionKey } = req.params;
-        const validKeys = ['hero', 'about', 'culture', 'mission', 'statistics', 'attending_virtually'];
+        const validKeys = ['hero', 'about', 'culture', 'mission', 'statistics', 'attending_virtually', 'cta'];
         
         if (!validKeys.includes(sectionKey)) {
             return res.status(400).json({
@@ -178,40 +228,35 @@ const getSiteContentByKey = async (req, res, next) => {
 const updateHero = async (req, res, next) => {
     try {
         const { title, content, sub_content, button_text, button_link } = req.body;
-        
-        let image = null;
-        
-        // Only try to upload if a file was actually provided
-        if (req.file && req.file.buffer) {
-            try {
-                const uploaded = await uploadImage(req.file, 'site-content');
-                image = uploaded.url;
-                console.log("Image uploaded successfully:", image);
-            } catch (uploadError) {
-                console.error("Image upload failed:", uploadError);
-            }
-        } else if (req.body.image && req.body.image !== 'undefined' && req.body.image !== 'null') {
-            image = req.body.image;
+        const existing = await siteContentRepository.getHero();
+        const extra = parseExtraData(req.body.extra_data);
+        const contentLines = extra.content_lines;
+
+        let mergedContent = content || null;
+        if (Array.isArray(contentLines) && contentLines.length) {
+            mergedContent = contentLines.join('\n');
+            extra.content_lines = contentLines;
         }
-        
+
+        const image = await uploadSectionImage(req, existing?.image);
+
         const updateData = {
             title: title || null,
-            content: content || null,
+            content: mergedContent,
             sub_content: sub_content || null,
             button_text: button_text || null,
-            button_link: button_link || null
+            button_link: button_link || null,
+            extra_data: { ...(existing?.extra_data || {}), ...extra }
         };
-        
-        if (image) {
-            updateData.image = image;
-        }
-        
+
+        if (image) updateData.image = image;
+
         const hero = await siteContentRepository.updateByKey('hero', updateData);
         
         res.json({
             success: true,
             message: 'Hero section updated successfully',
-            data: hero
+            data: formatPublicContent(hero)
         });
     } catch (error) {
         console.error("Error updating hero:", error);
@@ -227,54 +272,32 @@ const updateHero = async (req, res, next) => {
  */
 const updateAbout = async (req, res, next) => {
     try {
-        const { title, content, button_text, button_link } = req.body;
-        
-        let image = null;
-        
-        // Only try to upload if a file was actually provided
-        if (req.file && req.file.buffer) {
-            try {
-                const uploaded = await uploadImage(req.file, 'site-content');
-                image = uploaded.url;
-                console.log("Image uploaded successfully:", image);
-            } catch (uploadError) {
-                console.error("Image upload failed:", uploadError);
-                // Continue without image if upload fails
-            }
-        } else if (req.body.image && req.body.image !== 'undefined' && req.body.image !== 'null') {
-            // Keep existing image if provided as string
-            image = req.body.image;
-            console.log("Keeping existing image:", image);
-        }
-        
+        const { title, content, sub_content, button_text, button_link } = req.body;
+        const existing = await siteContentRepository.getAbout();
+        const extra = parseExtraData(req.body.extra_data);
+        const image = await uploadSectionImage(req, existing?.image);
+
         const updateData = {
             title: title || null,
             content: content || null,
+            sub_content: sub_content || null,
             button_text: button_text || null,
-            button_link: button_link || null
+            button_link: button_link || null,
+            extra_data: { ...(existing?.extra_data || {}), ...extra }
         };
-        
-        // Only add image to updateData if we have one
-        if (image) {
-            updateData.image = image;
-        }
-        
-        console.log("Updating about section with:", { ...updateData, hasImage: !!image });
-        
+
+        if (image) updateData.image = image;
+
         const about = await siteContentRepository.updateByKey('about', updateData);
         
         res.json({
             success: true,
             message: 'About section updated successfully',
-            data: about
+            data: formatPublicContent(about)
         });
     } catch (error) {
         console.error("Error updating about:", error);
-        res.status(500).json({
-            success: false,
-            message: "Failed to update about section",
-            error: error.message
-        });
+        next(error);
     }
 };
 
@@ -285,49 +308,28 @@ const updateAbout = async (req, res, next) => {
  */
 const updateCulture = async (req, res, next) => {
     try {
-        const { title, content } = req.body;
-        
-        let image = null;
-        
-        // Only try to upload if a file was actually provided
-        if (req.file && req.file.buffer) {
-            try {
-                const uploaded = await uploadImage(req.file, 'site-content');
-                image = uploaded.url;
-                console.log("Image uploaded successfully:", image);
-            } catch (uploadError) {
-                console.error("Image upload failed:", uploadError);
-            }
-        } else if (req.body.image && req.body.image !== 'undefined' && req.body.image !== 'null') {
-            image = req.body.image;
-            console.log("Keeping existing image:", image);
-        }
-        
+        const { title, content, sub_content } = req.body;
+        const existing = await siteContentRepository.getCulture();
+        const image = await uploadSectionImage(req, existing?.image);
+
         const updateData = {
             title: title || null,
-            content: content || null
+            content: content || null,
+            sub_content: sub_content || null
         };
-        
-        if (image) {
-            updateData.image = image;
-        }
-        
-        console.log("Updating culture with:", { ...updateData, hasImage: !!image });
-        
+
+        if (image) updateData.image = image;
+
         const culture = await siteContentRepository.updateByKey('culture', updateData);
         
         res.json({
             success: true,
             message: 'Culture section updated successfully',
-            data: culture
+            data: formatPublicContent(culture)
         });
     } catch (error) {
         console.error("Error updating culture:", error);
-        res.status(500).json({
-            success: false,
-            message: "Failed to update culture section",
-            error: error.message
-        });
+        next(error);
     }
 };
 
@@ -338,49 +340,58 @@ const updateCulture = async (req, res, next) => {
  */
 const updateMission = async (req, res, next) => {
     try {
-        const { title, content } = req.body;
-        
-        let image = null;
-        
-        // Only try to upload if a file was actually provided
-        if (req.file && req.file.buffer) {
-            try {
-                const uploaded = await uploadImage(req.file, 'site-content');
-                image = uploaded.url;
-                console.log("Image uploaded successfully:", image);
-            } catch (uploadError) {
-                console.error("Image upload failed:", uploadError);
-            }
-        } else if (req.body.image && req.body.image !== 'undefined' && req.body.image !== 'null') {
-            image = req.body.image;
-            console.log("Keeping existing image:", image);
-        }
-        
+        const { title, content, sub_content } = req.body;
+        const existing = await siteContentRepository.getMission();
+        const extra = parseExtraData(req.body.extra_data);
+        const image = await uploadSectionImage(req, existing?.image);
+
         const updateData = {
             title: title || null,
-            content: content || null
+            content: content || null,
+            sub_content: sub_content || null,
+            extra_data: { ...(existing?.extra_data || {}), ...extra }
         };
-        
-        if (image) {
-            updateData.image = image;
-        }
-        
-        console.log("Updating mission with:", { ...updateData, hasImage: !!image });
-        
+
+        if (image) updateData.image = image;
+
         const mission = await siteContentRepository.updateByKey('mission', updateData);
         
         res.json({
             success: true,
             message: 'Mission section updated successfully',
-            data: mission
+            data: formatPublicContent(mission)
         });
     } catch (error) {
         console.error("Error updating mission:", error);
-        res.status(500).json({
-            success: false,
-            message: "Failed to update mission section",
-            error: error.message
+        next(error);
+    }
+};
+
+const updateCta = async (req, res, next) => {
+    try {
+        const { title, content, sub_content, button_text, button_link } = req.body;
+        const existing = await siteContentRepository.findOne({ section_key: 'cta' });
+        const image = await uploadSectionImage(req, existing?.image);
+
+        const updateData = {
+            title: title || null,
+            content: content || null,
+            sub_content: sub_content || null,
+            button_text: button_text || null,
+            button_link: button_link || null
+        };
+
+        if (image) updateData.image = image;
+
+        const cta = await siteContentRepository.updateByKey('cta', updateData);
+
+        res.json({
+            success: true,
+            message: 'CTA section updated successfully',
+            data: formatPublicContent(cta)
         });
+    } catch (error) {
+        next(error);
     }
 };
 /**
@@ -479,6 +490,7 @@ module.exports = {
     getMission,
     getStatistics,
     getAttendingVirtually,
+    getCta,
     getAllSiteContent,
     getSiteContentByKey,
     updateHero,
@@ -487,5 +499,6 @@ module.exports = {
     updateMission,
     updateStatistics,
     updateAttendingVirtually,
+    updateCta,
     deleteSiteContent
 };

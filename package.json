@@ -6,7 +6,25 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "build:admin": "node scripts/build-admin.js",
+    "build:user": "node scripts/build-user.js",
+    "build:prod": "npm run build:admin && npm run build:user",
+    "predeploy": "node scripts/predeploy.js",
+    "start:prod": "node server.js",
+    "db:reset": "node scripts/reset-db.js",
+    "db:seed": "node scripts/seed-from-static.js",
+    "db:seed:partners": "node scripts/seed-partners-only.js",
+    "db:seed:subjects": "node scripts/seed-subjects-only.js",
+    "db:seed:secondary": "node scripts/seed-secondary-only.js",
+    "db:seed:igcse": "node scripts/seed-igcse-only.js",
+    "db:seed:a-level": "node scripts/seed-a-level-only.js",
+    "db:seed:timetable": "node scripts/seed-timetable-only.js",
+    "db:seed:tuition": "node scripts/seed-tuition-only.js",
+    "db:seed:awards": "node scripts/seed-awards-only.js",
+    "db:seed:faq": "node scripts/seed-faq-only.js",
+    "db:seed:history": "node scripts/seed-history-only.js",
+    "db:reset-seed": "node scripts/reset-db.js && node scripts/seed-from-static.js"
   },
   "keywords": [],
   "author": "",
@@ -19,15 +37,18 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.4.1",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
+    "nodemailer": "^9.0.1",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "cheerio": "^1.2.0",
     "nodemon": "^3.1.14"
   }
 }

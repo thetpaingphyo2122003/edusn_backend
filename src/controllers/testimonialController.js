@@ -1,6 +1,8 @@
 // src/controllers/testimonialController.js
 const testimonialRepository = require('../repositories/testimonialRepository');
+const TestimonialSettings = require('../models/TestimonialSettings');
 const { uploadImage, deleteImage } = require('../services/uploadService');
+const NotificationService = require('../services/notificationService');
 
 /**
  * @desc    Get all approved testimonials (for public)
@@ -87,10 +89,14 @@ const createTestimonial = async (req, res, next) => {
             message: req.body.message,
             rating: req.body.rating || 5,
             photo: photo,
-            status: 'pending',
+            status: req.body.status || 'pending',
             display_order: req.body.display_order || 0
         });
         
+        NotificationService.testimonialCreated(testimonial, req.user._id).catch((err) =>
+            console.error('Testimonial notification error:', err)
+        );
+
         res.status(201).json({
             success: true,
             message: 'Testimonial submitted successfully. Awaiting approval.',
@@ -299,6 +305,47 @@ const getTestimonialStats = async (req, res, next) => {
     }
 };
 
+const getTestimonialPageSettings = async (req, res, next) => {
+    try {
+        let settings = await TestimonialSettings.findOne();
+        if (!settings) {
+            settings = await TestimonialSettings.create({});
+        }
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        next(error);
+    }
+};
+
+const updateTestimonialPageSettings = async (req, res, next) => {
+    try {
+        let settings = await TestimonialSettings.findOne();
+        const payload = {
+            breadcrumb_title: req.body.breadcrumb_title,
+            heading_before: req.body.heading_before,
+            heading_highlight: req.body.heading_highlight,
+            heading_description: req.body.heading_description,
+            homepage_heading_before: req.body.homepage_heading_before,
+            homepage_heading_highlight: req.body.homepage_heading_highlight,
+            homepage_subtitle: req.body.homepage_subtitle,
+        };
+
+        if (settings) {
+            settings = await TestimonialSettings.findByIdAndUpdate(settings._id, payload, { new: true });
+        } else {
+            settings = await TestimonialSettings.create(payload);
+        }
+
+        res.json({
+            success: true,
+            message: 'Testimonial page settings updated',
+            data: settings,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 // ✅ Make sure ALL functions are exported
 module.exports = {
     getAllTestimonials,
@@ -311,5 +358,7 @@ module.exports = {
     rejectTestimonial,
     getPendingTestimonials,
     getTestimonialsByRole,
-    getTestimonialStats
+    getTestimonialStats,
+    getTestimonialPageSettings,
+    updateTestimonialPageSettings,
 };

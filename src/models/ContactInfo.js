@@ -35,6 +35,10 @@ const contactInfoSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    extra_data: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
+    },
     status: {
         type: String,
         enum: ['active', 'inactive'],

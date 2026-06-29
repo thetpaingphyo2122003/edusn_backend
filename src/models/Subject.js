@@ -5,7 +5,12 @@ const subjectSchema = new mongoose.Schema({
     category: {
         type: String,
         required: true,
-        enum: ['key_stage_1', 'key_stage_2', 'year_1', 'year_2']
+        enum: ['key_stage_1', 'key_stage_2', 'year_1', 'year_2', 'lower_secondary', 'upper_secondary']
+    },
+    year: {
+        type: String,
+        enum: ['year_1', 'year_2', 'year_3', 'year_4', 'year_5', 'year_6', 'year_7', 'year_8', 'year_9', 'year_10', 'year_11', null],
+        default: null
     },
     title: {
         type: String,
@@ -26,6 +31,14 @@ const subjectSchema = new mongoose.Schema({
     },
     image: {
         type: String,
+        default: null
+    },
+    subject_group: {
+        type: String,
+        default: null
+    },
+    list_column: {
+        type: Number,
         default: null
     },
     display_order: {

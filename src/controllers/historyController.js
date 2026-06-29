@@ -1,6 +1,7 @@
 // src/controllers/historyController.js
 const historyRepository = require('../repositories/historyRepository');
 const { uploadImage, deleteImage } = require('../services/uploadService');
+const NotificationService = require('../services/notificationService');
 
 // Helper function to extract public ID from Cloudinary URL
 const getPublicIdFromUrl = (url) => {
@@ -178,6 +179,12 @@ const createHistory = async (req, res, next) => {
             status: status || 'active'
         });
         
+        if (history.type === 'timeline') {
+            NotificationService.historyCreated(history, req.user._id).catch((err) =>
+                console.error('History notification error:', err)
+            );
+        }
+
         res.status(201).json({
             success: true,
             message: 'History entry created successfully',

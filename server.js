@@ -6,10 +6,12 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const compression = require('compression');
 const http = require('http');
 const socketIo = require('socket.io');
 const jwt = require('jsonwebtoken');
 const path = require('path');
+const fs = require('fs');
 
 // Load environment variables
 dotenv.config();
@@ -19,27 +21,37 @@ const connectDB = require('./src/config/database');
 const indexRoutes = require('./src/routes/index');
 const User = require('./src/models/User');
 const ChatSocket = require('./src/socket/chatSocket');
+const {
+    buildAllowedOrigins,
+    buildHelmetOptions,
+    generalApiLimiter,
+    setSpaStaticHeaders,
+    setUploadStaticHeaders,
+    validateSecurityEnv,
+} = require('./src/middleware/securityMiddleware');
+
+validateSecurityEnv();
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Create express app
 const app = express();
 
+if (isProduction || process.env.TRUST_PROXY === 'true') {
+    app.set('trust proxy', 1);
+}
+
+if (isProduction) {
+    app.use(compression());
+}
+
 // ============ SECURITY MIDDLEWARE ============
 app.use(
-    helmet({
-        crossOriginResourcePolicy: {
-            policy: 'cross-origin'
-        }
-    })
+    helmet(buildHelmetOptions(buildAllowedOrigins()))
 );
 
 // ============ CORS CONFIG ============
-const allowedOrigins = [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:3000',
-    process.env.FRONTEND_URL
-].filter(Boolean);
+const allowedOrigins = buildAllowedOrigins();
 
 app.use(
     cors({
@@ -62,14 +74,20 @@ app.use(
 );
 
 // ============ BODY PARSER ============
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+const bodyLimit = process.env.API_BODY_LIMIT || '5mb';
+app.use(express.json({ limit: bodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: bodyLimit }));
 
 // ============ LOGGER ============
-app.use(morgan('dev'));
+app.use(morgan(isProduction ? 'combined' : 'dev'));
 
 // ============ STATIC FILES ============
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+    dotfiles: 'deny',
+    fallthrough: false,
+    index: false,
+    setHeaders: setUploadStaticHeaders,
+}));
 
 // ============ DATABASE CONNECTION ============
 connectDB();
@@ -79,13 +97,40 @@ app.get('/api/health', (req, res) => {
     res.status(200).json({
         success: true,
         message: 'Server is running',
-        environment: process.env.NODE_ENV || 'development',
         timestamp: new Date()
     });
 });
 
 // ============ API ROUTES ============
+app.use('/api', generalApiLimiter);
 app.use('/api', indexRoutes);
+
+// ============ ADMIN PANEL (production) ============
+if (isProduction) {
+    const adminDist = path.join(__dirname, '../edusn_admin/dist');
+
+    if (fs.existsSync(adminDist)) {
+        app.use(express.static(adminDist, {
+            index: false,
+            setHeaders: setSpaStaticHeaders,
+        }));
+
+        // SPA routes: /admin/* and /staff/*
+        app.get(/^\/(admin|staff)(\/.*)?$/, (req, res) => {
+            res.sendFile(path.join(adminDist, 'index.html'));
+        });
+
+        if (process.env.ROOT_REDIRECT_ADMIN === 'true') {
+            app.get('/', (req, res) => {
+                res.redirect('/admin/login');
+            });
+        }
+
+        console.log('📦 Admin panel served from', adminDist);
+    } else {
+        console.warn('⚠️  Admin dist not found. Run: npm run build:admin');
+    }
+}
 
 // ============ 404 HANDLER ============
 app.use((req, res) => {
@@ -117,8 +162,8 @@ io.use(async (socket, next) => {
     try {
         let token = socket.handshake.auth?.token;
 
-        // Query token fallback
-        if (!token && socket.handshake.query.token) {
+        // Query token fallback is disabled in production because URLs are often logged.
+        if (!token && process.env.NODE_ENV !== 'production' && socket.handshake.query.token) {
             token = socket.handshake.query.token;
         }
 
@@ -131,7 +176,9 @@ io.use(async (socket, next) => {
             }
         }
 
-        console.log('🔑 Token received:', token ? 'YES' : 'NO');
+        if (process.env.NODE_ENV !== 'production') {
+            console.log('🔑 Socket token received:', token ? 'YES' : 'NO');
+        }
 
         if (!token) {
             return next(new Error('Authentication required'));
@@ -147,19 +194,16 @@ io.use(async (socket, next) => {
             return next(new Error('User not found'));
         }
 
-        // OPTIONAL STATUS CHECK
-        // Uncomment only if your User model has status field
-
-        /*
-        if (user.status !== 'active') {
+        if (['inactive', 'suspended'].includes(user.status)) {
             return next(new Error('Account inactive'));
         }
-        */
 
         // Attach user to socket
         socket.user = user;
 
-        console.log(`✅ Socket authenticated: ${user.email}`);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`✅ Socket authenticated: ${user.email}`);
+        }
 
         next();
     } catch (error) {
@@ -170,6 +214,9 @@ io.use(async (socket, next) => {
 
 // ============ INITIALIZE CHAT SOCKET ============
 new ChatSocket(io);
+
+const { setNotificationIo } = require('./src/utils/notificationEmitter');
+setNotificationIo(io);
 
 // Optional
 app.set('io', io);

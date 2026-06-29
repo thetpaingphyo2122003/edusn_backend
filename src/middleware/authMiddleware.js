@@ -35,10 +35,10 @@ const protect = async (req, res, next) => {
         }
 
         // Check if user is active
-        if (user.status === 'inactive') {
+        if (['inactive', 'suspended'].includes(user.status)) {
             return res.status(401).json({
                 success: false,
-                message: 'Your account is inactive. Please contact admin.'
+                message: 'Your account is not active. Please contact admin.'
             });
         }
 
@@ -69,6 +69,10 @@ const protect = async (req, res, next) => {
  */
 const authorize = (...roles) => {
     return (req, res, next) => {
+        if (req.user.role === 'super_admin') {
+            return next();
+        }
+
         if (!roles.includes(req.user.role)) {
             return res.status(403).json({
                 success: false,
