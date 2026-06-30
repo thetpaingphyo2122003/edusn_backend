@@ -40,8 +40,9 @@ const seedSiteContent = async () => {
     }
   });
 
-  const attendingTitle = cleanText($('.students-join1-right h2').first().text());
-  const attendingText = cleanText($('.students-join1-right p').first().text());
+  const attendingPage = loadHtml('Attending the School Virtually.html');
+  const attendingTitle = cleanText(attendingPage('.site-title').first().text()) || 'Attending the School Virtually';
+  const attendingText = cleanText(attendingPage('.contact-info-content p').first().text());
 
   const ctaArea = $('.cta-area').first();
   const ctaTitle = cleanText(ctaArea.find('h2').first().text());

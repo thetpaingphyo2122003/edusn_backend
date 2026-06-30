@@ -1,5 +1,6 @@
 const notificationRepository = require('../repositories/notificationRepository');
 const NotificationService = require('../services/notificationService');
+const UserNotificationService = require('../services/userNotificationService');
 const {
     broadcastRead,
     broadcastAllRead,
@@ -207,7 +208,8 @@ const deleteReadNotifications = async (req, res, next) => {
  */
 const createNotification = async (req, res, next) => {
     try {
-        const { type, title, message, link, reference_id, reference_model } = req.body;
+        const { type, title, message, link, reference_id, reference_model, audience } = req.body;
+        const resolvedAudience = audience || (type === 'announcement' ? 'users' : 'admins');
 
         const notification = await NotificationService.create({
             type: type || 'announcement',
@@ -216,13 +218,38 @@ const createNotification = async (req, res, next) => {
             link: link || '/admin/dashboard',
             reference_id: reference_id || null,
             reference_model: reference_model || null,
-            created_by: req.user._id
+            created_by: req.user._id,
+            audience: resolvedAudience,
         });
-        
+
+        let userDelivered = 0;
+        if (['users', 'staff', 'everyone'].includes(resolvedAudience)) {
+            const targets = resolvedAudience === 'everyone'
+                ? ['users', 'staff']
+                : [resolvedAudience];
+            for (const target of targets) {
+                const delivered = await UserNotificationService.broadcastToAudience(
+                    target,
+                    {
+                        type: type || 'announcement',
+                        title,
+                        message,
+                        link: link || '/',
+                        admin_notification_id: notification?._id,
+                    },
+                    req.user._id
+                );
+                userDelivered += delivered.length;
+            }
+        }
+
         res.status(201).json({
             success: true,
-            message: 'Notification created successfully',
-            data: notification
+            message: userDelivered
+                ? `Notification sent to admins and ${userDelivered} user inbox(es)`
+                : 'Notification created successfully',
+            data: notification,
+            userDelivered,
         });
     } catch (error) {
         console.error('Create notification error:', error);

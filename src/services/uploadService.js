@@ -4,6 +4,8 @@ const path = require('path');
 const cloudinary = require('../config/cloudinary');
 const sharp = require('sharp');
 
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100MB
+
 const uploadsRoot = path.join(__dirname, '../../uploads');
 
 const buildLocalFilename = (originalname) => {
@@ -95,17 +97,15 @@ const uploadImage = async (file, folder = 'edusn') => {
     }
 };
 
-// ✅ NEW: Upload video with 50MB limit
+// Upload video — max 100MB
 const uploadVideo = async (file, folder = 'edusn') => {
     try {
         if (!file || !file.buffer) {
             throw new Error('No file provided');
         }
         
-        // Check file size (50MB = 50 * 1024 * 1024 bytes)
-        const maxSize = 50 * 1024 * 1024;
-        if (file.size > maxSize) {
-            throw new Error('Video size exceeds 50MB limit');
+        if (file.size > MAX_UPLOAD_BYTES) {
+            throw new Error('This video is too large to send. Please choose one smaller than 100 MB.');
         }
         
         // Check if it's a video file

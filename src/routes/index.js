@@ -23,6 +23,7 @@ const partnerRoutes = require('./partnerRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
 const userRoutes = require('./userRoutes');
 const notificationRoutes = require('./notificationRoutes');
+const userNotificationRoutes = require('./userNotificationRoutes');
 const dynamicPageRoutes = require('./dynamicPageRoutes');
 const uploadRoutes = require('./uploadRoutes');  // ✅ Add this line
 
@@ -57,6 +58,7 @@ router.use('/partners', partnerRoutes);
 router.use('/dashboard', dashboardRoutes);
 router.use('/users', userRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/user-notifications', userNotificationRoutes);
 router.use('/dynamic-pages', dynamicPageRoutes);
 router.use('/upload', uploadRoutes);  // ✅ Add this line
 

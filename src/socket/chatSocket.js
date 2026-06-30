@@ -3,6 +3,7 @@ const chatRoomRepository = require('../repositories/chatRoomRepository');
 const chatMessageRepository = require('../repositories/chatMessageRepository');
 const User = require('../models/User');
 const { canAccessRoom, isSupportRoom } = require('../utils/chatHelpers');
+const { userInboxRoom } = require('../utils/notificationEmitter');
 
 // Online Users: userId -> { socketId, name, role, currentRoom }
 const onlineUsers = new Map();
@@ -32,6 +33,8 @@ class ChatSocket {
             if (['admin', 'super_admin', 'staff', 'editor'].includes(user.role)) {
                 socket.join('admin_notifications');
             }
+
+            socket.join(userInboxRoom(userId));
 
             onlineUsers.set(userId, {
                 socketId: socket.id,

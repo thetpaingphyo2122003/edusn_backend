@@ -15,7 +15,8 @@ class NotificationService {
                 link: data.link,
                 reference_id: data.reference_id || null,
                 reference_model: data.reference_model || null,
-                created_by: data.created_by || null
+                created_by: data.created_by || null,
+                audience: data.audience || 'admins',
             });
         } catch (error) {
             console.error('Error creating notification:', error);

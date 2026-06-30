@@ -37,6 +37,11 @@ const notificationSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         default: null
+    },
+    audience: {
+        type: String,
+        enum: ['admins', 'users', 'staff', 'everyone'],
+        default: 'admins'
     }
 }, {
     timestamps: true

@@ -6,6 +6,86 @@ const NotificationService = require('../services/notificationService');
 const isTeacherAwardCategory = (category = '') =>
     category.replace(/['’]/g, '').toLowerCase().includes('favorite teacher');
 
+const resolveAwardType = (body = {}) => {
+    if (body.award_type === 'teacher' || body.award_type === 'student') {
+        return body.award_type;
+    }
+    if (isTeacherAwardCategory(body.award_category || '')) {
+        return 'teacher';
+    }
+    if (body.teacher_name && !body.student_name) {
+        return 'teacher';
+    }
+    return 'student';
+};
+
+const validateAwardPayload = (body, { isUpdate = false } = {}) => {
+    const errors = [];
+    const awardType = resolveAwardType(body);
+
+    if (!body.academic_year?.trim()) {
+        errors.push('Academic year is required');
+    } else if (!/^\d{4}-\d{4}$/.test(body.academic_year.trim())) {
+        errors.push('Academic year must use format YYYY-YYYY (e.g. 2024-2025)');
+    }
+
+    if (!body.award_category?.trim()) {
+        errors.push('Award category is required');
+    }
+
+    if (awardType === 'teacher') {
+        if (!body.teacher_name?.trim()) {
+            errors.push('Teacher name is required for teacher award');
+        }
+        if (!body.subject?.trim()) {
+            errors.push('Subject is required for teacher award');
+        }
+    } else {
+        if (!body.student_name?.trim()) {
+            errors.push('Student name is required for student award');
+        }
+        if (!body.grade_year?.trim()) {
+            errors.push('Grade/Year is required for student award');
+        }
+    }
+
+    if (body.display_order !== undefined && body.display_order !== null && body.display_order !== '') {
+        const order = Number(body.display_order);
+        if (Number.isNaN(order) || order < 0 || order > 999) {
+            errors.push('Display order must be between 0 and 999');
+        }
+    }
+
+    return { errors, awardType };
+};
+
+const normalizeAwardFields = (body, awardType) => {
+    const normalized = {
+        academic_year: body.academic_year?.trim(),
+        campus: body.campus?.trim() || null,
+        award_category: body.award_category?.trim() || null,
+        sub_category: body.sub_category?.trim() || null,
+        award_title: body.award_title?.trim() || null,
+        display_order: body.display_order !== undefined && body.display_order !== null && body.display_order !== ''
+            ? Number(body.display_order)
+            : 0,
+    };
+
+    if (awardType === 'teacher') {
+        normalized.student_name = null;
+        normalized.grade_year = null;
+        normalized.teacher_name = body.teacher_name?.trim() || null;
+        normalized.subject = body.subject?.trim() || null;
+    } else {
+        normalized.teacher_name = null;
+        normalized.subject = null;
+        normalized.student_name = body.student_name?.trim() || null;
+        normalized.grade_year = body.grade_year?.trim() || null;
+    }
+
+    return normalized;
+};
+
 /**
  * @desc    Get all awards (PUBLIC - active only)
  * @route   GET /api/awards
@@ -314,69 +394,18 @@ const getAwardStats = async (req, res, next) => {
  */
 const createAward = async (req, res, next) => {
     try {
-        const { 
-            academic_year, 
-            campus, 
-            award_category, 
-            sub_category, 
-            award_title, 
-            student_name, 
-            grade_year, 
-            teacher_name, 
-            subject, 
-            display_order 
-        } = req.body;
-        
-        // Validate required fields
-        if (!academic_year) {
+        const { errors, awardType } = validateAwardPayload(req.body);
+        if (errors.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Academic year is required'
+                message: errors[0],
+                errors,
             });
         }
-        
-        if (!award_category) {
-            return res.status(400).json({
-                success: false,
-                message: 'Award category is required'
-            });
-        }
-        
-        // Validate based on award type
-        if (isTeacherAwardCategory(award_category)) {
-            if (!teacher_name) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Teacher name is required for teacher award'
-                });
-            }
-        } else {
-            if (!student_name) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Student name is required for student award'
-                });
-            }
-            if (!grade_year) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Grade/Year is required for student award'
-                });
-            }
-        }
-        
+
         const award = await awardRepository.create({
-            academic_year,
-            campus: campus || null,
-            award_category: award_category || null,
-            sub_category: sub_category || null,
-            award_title: award_title || null,
-            student_name: student_name || null,
-            grade_year: grade_year || null,
-            teacher_name: teacher_name || null,
-            subject: subject || null,
-            display_order: display_order || 0,
-            status: 'active'
+            ...normalizeAwardFields(req.body, awardType),
+            status: 'active',
         });
         
         NotificationService.awardCreated(award, req.user._id).catch((err) =>
@@ -401,20 +430,6 @@ const createAward = async (req, res, next) => {
 const updateAward = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { 
-            academic_year, 
-            campus, 
-            award_category, 
-            sub_category, 
-            award_title, 
-            student_name, 
-            grade_year, 
-            teacher_name, 
-            subject, 
-            display_order, 
-            status 
-        } = req.body;
-        
         const award = await awardRepository.findById(id);
         
         if (!award) {
@@ -423,19 +438,33 @@ const updateAward = async (req, res, next) => {
                 message: 'Award not found'
             });
         }
-        
+
+        const mergedBody = {
+            academic_year: req.body.academic_year ?? award.academic_year,
+            campus: req.body.campus ?? award.campus,
+            award_category: req.body.award_category ?? award.award_category,
+            sub_category: req.body.sub_category ?? award.sub_category,
+            award_title: req.body.award_title ?? award.award_title,
+            student_name: req.body.student_name ?? award.student_name,
+            grade_year: req.body.grade_year ?? award.grade_year,
+            teacher_name: req.body.teacher_name ?? award.teacher_name,
+            subject: req.body.subject ?? award.subject,
+            display_order: req.body.display_order ?? award.display_order,
+            award_type: req.body.award_type,
+        };
+
+        const { errors, awardType } = validateAwardPayload(mergedBody, { isUpdate: true });
+        if (errors.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: errors[0],
+                errors,
+            });
+        }
+
         const updatedAward = await awardRepository.updateById(id, {
-            academic_year: academic_year || award.academic_year,
-            campus: campus !== undefined ? campus : award.campus,
-            award_category: award_category !== undefined ? award_category : award.award_category,
-            sub_category: sub_category !== undefined ? sub_category : award.sub_category,
-            award_title: award_title !== undefined ? award_title : award.award_title,
-            student_name: student_name !== undefined ? student_name : award.student_name,
-            grade_year: grade_year !== undefined ? grade_year : award.grade_year,
-            teacher_name: teacher_name !== undefined ? teacher_name : award.teacher_name,
-            subject: subject !== undefined ? subject : award.subject,
-            display_order: display_order !== undefined ? display_order : award.display_order,
-            status: status || award.status
+            ...normalizeAwardFields(mergedBody, awardType),
+            status: req.body.status || award.status,
         });
         
         res.json({

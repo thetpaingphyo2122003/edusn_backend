@@ -80,8 +80,8 @@ const inferSubjectFromImage = (src = '') => {
   return null;
 };
 
-const parseAwards = () => {
-  const filePath = staticFile('2022_2023AY_Awards.html');
+const parseAwards = ({ htmlFile = '2022_2023AY_Awards.html', forceAcademicYear = null } = {}) => {
+  const filePath = staticFile(htmlFile);
   if (!fs.existsSync(filePath)) {
     throw new Error(`Awards HTML not found: ${filePath}`);
   }
@@ -96,7 +96,7 @@ const parseAwards = () => {
     const subtitle = cleanText(section.find('.site-heading p').first().text());
     if (!headingText && !subtitle) return;
 
-    const academicYear = extractAcademicYear(subtitle);
+    const academicYear = forceAcademicYear || extractAcademicYear(subtitle);
     const { award_category, sub_category = null } = mapSectionCategory(headingText, subtitle);
     const isTeacherCategory = /favorite teacher/i.test(award_category);
 
@@ -143,7 +143,10 @@ const parseAwards = () => {
     throw new Error('No awards parsed from static HTML');
   }
 
-  const academicYear = entries[0]?.academic_year || '2022-2023';
+  const academicYear = forceAcademicYear || entries[0]?.academic_year || '2022-2023';
+  const normalizedEntries = forceAcademicYear
+    ? entries.map((entry) => ({ ...entry, academic_year: forceAcademicYear }))
+    : entries;
 
   return {
     settings: {
@@ -151,7 +154,7 @@ const parseAwards = () => {
       default_academic_year: academicYear,
       page_intro: '',
     },
-    entries,
+    entries: normalizedEntries,
     academicYear,
   };
 };

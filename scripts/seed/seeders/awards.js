@@ -26,12 +26,19 @@ const upsertPageSettings = async (settings) => {
   await existing.save();
 };
 
-const seedAwards = async () => {
-  const { settings, entries, academicYear } = parseAwards();
+const seedAwards = async ({
+  htmlFile,
+  forceAcademicYear,
+  updateDefaultYear = true,
+} = {}) => {
+  const { settings, entries, academicYear } = parseAwards({ htmlFile, forceAcademicYear });
 
   await Award.deleteMany({ academic_year: academicYear });
   await Award.insertMany(entries);
-  await upsertPageSettings(settings);
+
+  if (updateDefaultYear) {
+    await upsertPageSettings(settings);
+  }
 
   const categoryCounts = entries.reduce((acc, entry) => {
     const key = entry.sub_category

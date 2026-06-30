@@ -22,6 +22,7 @@
     "db:seed:timetable": "node scripts/seed-timetable-only.js",
     "db:seed:tuition": "node scripts/seed-tuition-only.js",
     "db:seed:awards": "node scripts/seed-awards-only.js",
+    "db:seed:awards:2025-2026": "node scripts/seed-awards-2025-2026.js",
     "db:seed:faq": "node scripts/seed-faq-only.js",
     "db:seed:history": "node scripts/seed-history-only.js",
     "db:reset-seed": "node scripts/reset-db.js && node scripts/seed-from-static.js"

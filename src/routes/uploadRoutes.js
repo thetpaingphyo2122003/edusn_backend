@@ -29,13 +29,13 @@ const videoUpload = multer({
 });
 
 const sendUploadError = (res) =>
-    res.status(500).json({ success: false, message: 'Upload failed. Please try again.' });
+    res.status(500).json({ success: false, message: 'We could not send your file. Please try again.' });
 
 // Upload image - max 10MB
 router.post('/image', protect, uploadLimiter, upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: 'No image file provided' });
+            return res.status(400).json({ success: false, message: 'Please choose a photo to send.' });
         }
         validateUploadedFile(req.file, 'image');
         
@@ -45,7 +45,7 @@ router.post('/image', protect, uploadLimiter, upload.single('image'), async (req
         console.error('Image upload error:', error);
         res.status(error.statusCode || 500).json({
             success: false,
-            message: error.statusCode ? error.message : 'Image upload failed. Please try again.',
+            message: error.statusCode ? error.message : 'We could not send your photo. Please try again.',
         });
     }
 });
@@ -54,14 +54,14 @@ router.post('/image', protect, uploadLimiter, upload.single('image'), async (req
 router.post('/video', protect, uploadLimiter, videoUpload.single('video'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: 'No video file provided' });
+            return res.status(400).json({ success: false, message: 'Please choose a video to send.' });
         }
         
         // Check file size
         if (req.file.size > 100 * 1024 * 1024) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Video size exceeds 100MB limit. Please upload a smaller video.' 
+                message: 'This video is too large to send. Please choose one smaller than 100 MB.' 
             });
         }
         
@@ -78,7 +78,7 @@ router.post('/video', protect, uploadLimiter, videoUpload.single('video'), async
         console.error('Video upload error:', error);
         res.status(error.statusCode || 500).json({
             success: false,
-            message: error.statusCode ? error.message : 'Video upload failed. Please try again.',
+            message: error.statusCode ? error.message : 'We could not send your video. Please try again.',
         });
     }
 });
@@ -87,7 +87,7 @@ router.post('/video', protect, uploadLimiter, videoUpload.single('video'), async
 router.post('/file', protect, uploadLimiter, uploadFileMiddleware.single('file'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: 'No file provided' });
+            return res.status(400).json({ success: false, message: 'Please choose a file to send.' });
         }
         validateUploadedFile(req.file, 'document');
         
@@ -97,7 +97,7 @@ router.post('/file', protect, uploadLimiter, uploadFileMiddleware.single('file')
         console.error('File upload error:', error);
         res.status(error.statusCode || 500).json({
             success: false,
-            message: error.statusCode ? error.message : 'File upload failed. Please try again.',
+            message: error.statusCode ? error.message : 'We could not send your file. Please try again.',
         });
     }
 });
@@ -106,7 +106,7 @@ router.post('/file', protect, uploadLimiter, uploadFileMiddleware.single('file')
 router.post('/', protect, uploadLimiter, videoUpload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ success: false, message: 'No file provided' });
+            return res.status(400).json({ success: false, message: 'Please choose a file to send.' });
         }
         
         validateUploadedFile(req.file, 'any');
@@ -122,7 +122,7 @@ router.post('/', protect, uploadLimiter, videoUpload.single('file'), async (req,
             if (req.file.size > 100 * 1024 * 1024) {
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'Video size exceeds 100MB limit' 
+                    message: 'This video is too large to send. Please choose one smaller than 100 MB.' 
                 });
             }
             result = await uploadVideo(req.file, 'chat/uploads');

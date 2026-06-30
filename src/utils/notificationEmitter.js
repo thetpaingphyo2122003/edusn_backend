@@ -2,6 +2,8 @@ const notificationRepository = require('../repositories/notificationRepository')
 
 const ADMIN_ROOM = 'admin_notifications';
 
+const userInboxRoom = (userId) => `user_inbox_${userId}`;
+
 let io = null;
 
 function setNotificationIo(socketIo) {
@@ -11,6 +13,11 @@ function setNotificationIo(socketIo) {
 function emitToAdmins(event, payload) {
     if (!io) return;
     io.to(ADMIN_ROOM).emit(event, payload);
+}
+
+function emitToUser(userId, event, payload) {
+    if (!io || !userId) return;
+    io.to(userInboxRoom(String(userId))).emit(event, payload);
 }
 
 async function createAndBroadcast(data) {
@@ -43,8 +50,10 @@ function broadcastDeleted(id) {
 
 module.exports = {
     ADMIN_ROOM,
+    userInboxRoom,
     setNotificationIo,
     emitToAdmins,
+    emitToUser,
     createAndBroadcast,
     broadcastRead,
     broadcastAllRead,
